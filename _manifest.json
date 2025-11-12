@@ -1,0 +1,68 @@
+{
+  "manifest_version": 1,
+  "name": "聊天记录总结插件 (Chat Summary Plugin)",
+  "version": "1.0.0",
+  "description": "分析群聊聊天记录并生成智能总结，支持群聊整体总结和单个用户总结，可选择不同时间范围",
+  "author": {
+    "name": "MaiBot开发团队",
+    "url": "https://github.com/Mai-with-u"
+  },
+  "license": "GPL-v3.0-or-later",
+
+  "host_application": {
+    "min_version": "0.8.0"
+  },
+  "homepage_url": "https://github.com/Mai-with-u/maibot",
+  "repository_url": "https://github.com/Mai-with-u/maibot",
+  "keywords": ["chat", "summary", "analysis", "ai", "群聊", "总结", "分析"],
+  "categories": ["Utilities", "Analysis", "AI"],
+
+  "default_locale": "zh-CN",
+  "locales_path": "_locales",
+
+  "plugin_info": {
+    "is_built_in": false,
+    "plugin_type": "utility",
+    "components": [
+      {
+        "type": "command",
+        "name": "chat_summary",
+        "description": "生成聊天记录总结",
+        "pattern": "/summary"
+      }
+    ],
+    "features": [
+      "群聊整体聊天记录总结",
+      "单个用户聊天记录总结",
+      "支持多种时间范围（今天、昨天、最近N天、指定日期）",
+      "AI智能分析聊天内容",
+      "统计活跃度、话题、情绪等维度",
+      "友好的格式化输出"
+    ],
+    "dependencies": {
+      "python": [],
+      "plugins": []
+    },
+    "config": {
+      "config_file": "config.toml",
+      "has_default_config": true
+    }
+  },
+
+  "permissions": [
+    "database.messages.read",
+    "llm.generate"
+  ],
+
+  "changelog": {
+    "1.0.0": {
+      "date": "2025-11-12",
+      "changes": [
+        "初始版本发布",
+        "支持群聊整体总结",
+        "支持单个用户总结",
+        "支持多种时间范围选择"
+      ]
+    }
+  }
+}
