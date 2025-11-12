@@ -489,14 +489,14 @@ class ChatSummaryCommand(BaseCommand):
 用户数据：
 {users_info}
 
-**重要**：返回的JSON中不要包含emoji表情符号，理由部分最多30字。
+**重要**：返回的JSON中不要包含emoji表情符号，理由部分要详细、有趣，60-80字左右。
 
 请返回 JSON 格式（不要markdown代码块）：
 [
   {{
     "name": "用户名",
     "title": "称号",
-    "reason": "获得此称号的简短原因（纯文字，无emoji，最多30字）"
+    "reason": "获得此称号的详细原因，要生动有趣，可以加点调侃或梗（纯文字，无emoji，60-80字）"
   }}
 ]"""
 
@@ -590,21 +590,21 @@ class ChatSummaryCommand(BaseCommand):
 - 让人印象深刻的发言
 
 对于每个金句，请提供：
-1. **原文内容**（最多40字，不要包含emoji表情符号）
+1. **原文内容**（不要包含emoji表情符号）
 2. **发言人昵称**
-3. **选择理由**（最多50字，简短说明）
+3. **选择理由**（80-100字，详细说明为什么这句话有趣、精彩或值得记录）
 
 群聊记录：
 {messages_text}
 
-**重要**：不要在JSON中包含emoji表情符号（如🔪😀等），请用文字描述代替。
+**重要**：不要在JSON中包含emoji表情符号（如🔪😀等），请用文字描述代替。理由部分要详细、有趣，可以分析这句话的梗、笑点、或为什么让人印象深刻。
 
 请返回 JSON 格式（不要markdown代码块）：
 [
   {{
     "content": "金句原文（纯文字，无emoji）",
     "sender": "发言人昵称",
-    "reason": "选择理由（纯文字，无emoji）"
+    "reason": "详细的选择理由，分析这句话为什么有趣或精彩（纯文字，无emoji，80-100字）"
   }}
 ]"""
 
@@ -1052,6 +1052,262 @@ class DailySummaryEventHandler(BaseEventHandler):
                 formatted.append(f"[{time_str}] {display_name}: {text}")
 
         return "\n".join(formatted)
+
+    def _analyze_user_stats(self, messages: List[dict]) -> Dict[str, Dict]:
+        """分析用户统计数据
+
+        Returns:
+            用户统计字典，格式: {user_id: {nickname, message_count, char_count, emoji_count, ...}}
+        """
+        user_stats = {}
+
+        for msg in messages:
+            user_id = str(msg.get("user_id", ""))
+            if not user_id:
+                continue
+
+            nickname = msg.get("user_nickname", "未知用户")
+            text = msg.get("processed_plain_text", "")
+
+            if user_id not in user_stats:
+                user_stats[user_id] = {
+                    "nickname": nickname,
+                    "message_count": 0,
+                    "char_count": 0,
+                    "emoji_count": 0,
+                    "hours": Counter(),  # 各小时发言次数
+                }
+
+            stats = user_stats[user_id]
+            stats["message_count"] += 1
+            stats["char_count"] += len(text)
+
+            # 统计 emoji 数量（简单判断）
+            emoji_count = text.count('😀') + text.count('😁') + text.count('🤣')  # 简化处理
+            stats["emoji_count"] += emoji_count
+
+            # 统计发言时间
+            timestamp = msg.get("time", 0)
+            hour = datetime.fromtimestamp(timestamp).hour
+            stats["hours"][hour] += 1
+
+        return user_stats
+
+    async def _analyze_user_titles(self, messages: List[dict], user_stats: Dict) -> Optional[List[Dict]]:
+        """使用 LLM 分析群友称号
+
+        Returns:
+            称号列表，格式: [{name, title, reason}, ...]
+        """
+        try:
+            # 只分析发言 >= 5 条的用户
+            active_users = {
+                uid: stats for uid, stats in user_stats.items()
+                if stats["message_count"] >= 5
+            }
+
+            if not active_users:
+                return []
+
+            # 构建用户数据文本
+            users_text = []
+            for user_id, stats in sorted(active_users.items(),
+                                         key=lambda x: x[1]["message_count"],
+                                         reverse=True)[:8]:  # 最多8人
+                night_messages = sum(stats["hours"][h] for h in range(0, 6))
+                avg_chars = stats["char_count"] / stats["message_count"] if stats["message_count"] > 0 else 0
+                emoji_ratio = stats["emoji_count"] / stats["message_count"] if stats["message_count"] > 0 else 0
+                night_ratio = night_messages / stats["message_count"] if stats["message_count"] > 0 else 0
+
+                users_text.append(
+                    f"- {stats['nickname']}: "
+                    f"发言{stats['message_count']}条, 平均{avg_chars:.1f}字, "
+                    f"表情比例{emoji_ratio:.2f}, 夜间发言比例{night_ratio:.2f}"
+                )
+
+            users_info = "\n".join(users_text)
+
+            # 构建 prompt
+            prompt = f"""请为以下群友分配合适的称号。
+
+可选称号：
+- **龙王**: 发言频繁但内容轻松的人
+- **技术大佬**: 经常讨论技术话题的人
+- **夜猫子**: 经常在深夜发言的人
+- **表情包军火库**: 经常发表情的人
+- **话题终结者**: 经常开启话题的人
+- **评论家**: 平均发言长度很长的人
+- **潜水员**: 发言很少但精准的人
+- **互动达人**: 经常回复别人的人
+
+用户数据：
+{users_info}
+
+**重要**：返回的JSON中不要包含emoji表情符号，理由部分要详细、有趣，60-80字左右。
+
+请返回 JSON 格式（不要markdown代码块）：
+[
+  {{
+    "name": "用户名",
+    "title": "称号",
+    "reason": "获得此称号的详细原因，要生动有趣，可以加点调侃或梗（纯文字，无emoji，60-80字）"
+  }}
+]"""
+
+            # 使用 LLM 生成
+            model_task_config = model_config.model_task_config.replyer
+            success, result, reasoning, model_name = await llm_api.generate_with_model(
+                prompt=prompt,
+                model_config=model_task_config,
+                request_type="plugin.chat_summary.titles",
+                temperature=0.6,
+            )
+
+            if not success:
+                logger.error(f"LLM生成称号失败: {result}")
+                return []
+
+            # 解析 JSON
+            try:
+                # 去除可能的 markdown 代码块标记
+                result = result.strip()
+                if result.startswith("```"):
+                    result = result.split("```")[1]
+                    if result.startswith("json"):
+                        result = result[4:]
+                result = result.strip()
+
+                # 尝试直接解析,因为我们已经在prompt中要求不使用emoji
+                titles = json.loads(result)
+                return titles if isinstance(titles, list) else []
+            except json.JSONDecodeError as e:
+                logger.error(f"解析称号 JSON 失败: {e}, 尝试清理emoji后重试")
+                # 只有解析失败时才尝试清理emoji
+                try:
+                    import re
+                    # 只移除真正的emoji,使用更精确的模式
+                    emoji_pattern = re.compile(
+                        "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF\U00002702-\U000027B0\U000024C2-\U0001F251\U0001F900-\U0001F9FF]+",
+                        flags=re.UNICODE
+                    )
+                    result_cleaned = emoji_pattern.sub('', result)
+                    titles = json.loads(result_cleaned)
+                    return titles if isinstance(titles, list) else []
+                except Exception as e2:
+                    logger.error(f"清理emoji后仍然失败: {e2}, 原文: {result[:200]}")
+                    return []
+
+        except Exception as e:
+            logger.error(f"分析群友称号失败: {e}", exc_info=True)
+            return []
+
+    async def _analyze_golden_quotes(self, messages: List[dict]) -> Optional[List[Dict]]:
+        """使用 LLM 提取群聊金句（群圣经）
+
+        Returns:
+            金句列表，格式: [{content, sender, reason}, ...]
+        """
+        try:
+            # 提取适合的消息（长度5-100字）
+            interesting_messages = []
+            for msg in messages:
+                nickname = msg.get("user_nickname", "未知用户")
+                cardname = msg.get("user_cardname", "")
+                display_name = cardname if cardname else nickname
+                text = msg.get("processed_plain_text", "")
+                timestamp = msg.get("time", 0)
+                time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M")
+
+                if 5 <= len(text) <= 100 and not text.startswith(("http", "www", "/")):
+                    interesting_messages.append({
+                        "sender": display_name,
+                        "time": time_str,
+                        "content": text
+                    })
+
+            if not interesting_messages:
+                return []
+
+            # 构建消息文本
+            messages_text = "\n".join([
+                f"[{msg['time']}] {msg['sender']}: {msg['content']}"
+                for msg in interesting_messages
+            ])
+
+            # 构建 prompt
+            prompt = f"""请从以下群聊记录中挑选出 **3-5** 句最有趣、最精彩的「金句」。
+
+金句标准：
+- 有趣的梗或笑点
+- 精彩的吐槽或评论
+- 有冲击力的观点
+- 让人印象深刻的发言
+
+对于每个金句，请提供：
+1. **原文内容**（不要包含emoji表情符号）
+2. **发言人昵称**
+3. **选择理由**（80-100字，详细说明为什么这句话有趣、精彩或值得记录）
+
+群聊记录：
+{messages_text}
+
+**重要**：不要在JSON中包含emoji表情符号（如🔪😀等），请用文字描述代替。理由部分要详细、有趣，可以分析这句话的梗、笑点、或为什么让人印象深刻。
+
+请返回 JSON 格式（不要markdown代码块）：
+[
+  {{
+    "content": "金句原文（纯文字，无emoji）",
+    "sender": "发言人昵称",
+    "reason": "详细的选择理由，分析这句话为什么有趣或精彩（纯文字，无emoji，80-100字）"
+  }}
+]"""
+
+            # 使用 LLM 生成
+            model_task_config = model_config.model_task_config.replyer
+            success, result, reasoning, model_name = await llm_api.generate_with_model(
+                prompt=prompt,
+                model_config=model_task_config,
+                request_type="plugin.chat_summary.quotes",
+                temperature=0.7,
+            )
+
+            if not success:
+                logger.error(f"LLM生成金句失败: {result}")
+                return []
+
+            # 解析 JSON
+            try:
+                # 去除可能的 markdown 代码块标记
+                result = result.strip()
+                if result.startswith("```"):
+                    result = result.split("```")[1]
+                    if result.startswith("json"):
+                        result = result[4:]
+                result = result.strip()
+
+                # 尝试直接解析,因为我们已经在prompt中要求不使用emoji
+                quotes = json.loads(result)
+                return quotes if isinstance(quotes, list) else []
+            except json.JSONDecodeError as e:
+                logger.error(f"解析金句 JSON 失败: {e}, 尝试清理emoji后重试")
+                # 只有解析失败时才尝试清理emoji
+                try:
+                    import re
+                    # 只移除真正的emoji,使用更精确的模式
+                    emoji_pattern = re.compile(
+                        "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF\U00002702-\U000027B0\U000024C2-\U0001F251\U0001F900-\U0001F9FF]+",
+                        flags=re.UNICODE
+                    )
+                    result_cleaned = emoji_pattern.sub('', result)
+                    quotes = json.loads(result_cleaned)
+                    return quotes if isinstance(quotes, list) else []
+                except Exception as e2:
+                    logger.error(f"清理emoji后仍然失败: {e2}, 原文: {result[:200]}")
+                    return []
+
+        except Exception as e:
+            logger.error(f"分析金句失败: {e}", exc_info=True)
+            return []
 
 
 @register_plugin

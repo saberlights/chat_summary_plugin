@@ -170,6 +170,61 @@ class SummaryImageGenerator:
                 draw.line([(x1, y), (x2, y)], fill=(r, g, b))
 
     @staticmethod
+    def _draw_card_corner_decoration(
+        img: Image.Image,
+        card_coords: tuple,
+        corner_path: str = None
+    ):
+        """在卡片角落添加装饰
+
+        Args:
+            img: 目标图片
+            card_coords: 卡片坐标 (x1, y1, x2, y2)
+            corner_path: 角落装饰图片路径
+        """
+        if not corner_path or not os.path.exists(corner_path):
+            return
+
+        try:
+            x1, y1, x2, y2 = card_coords
+            corner_img = Image.open(corner_path).convert("RGBA")
+
+            # 缩放到合适大小
+            corner_size = 40
+            w, h = corner_img.size
+            scale = min(corner_size / w, corner_size / h, 1.0)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            if scale < 1.0:
+                corner_img = corner_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+            # 创建临时图层
+            temp = Image.new('RGBA', img.size, (0, 0, 0, 0))
+
+            # 左上角
+            temp.paste(corner_img, (x1 + 5, y1 + 5), corner_img)
+
+            # 右上角（水平翻转）
+            corner_flipped_h = corner_img.transpose(Image.FLIP_LEFT_RIGHT)
+            temp.paste(corner_flipped_h, (x2 - new_w - 5, y1 + 5), corner_flipped_h)
+
+            # 左下角（垂直翻转）
+            corner_flipped_v = corner_img.transpose(Image.FLIP_TOP_BOTTOM)
+            temp.paste(corner_flipped_v, (x1 + 5, y2 - new_h - 5), corner_flipped_v)
+
+            # 右下角（水平+垂直翻转）
+            corner_flipped_both = corner_img.transpose(Image.FLIP_LEFT_RIGHT).transpose(Image.FLIP_TOP_BOTTOM)
+            temp.paste(corner_flipped_both, (x2 - new_w - 5, y2 - new_h - 5), corner_flipped_both)
+
+            # 合并到主图
+            img_with_alpha = img.convert('RGBA')
+            img_with_alpha = Image.alpha_composite(img_with_alpha, temp)
+            img.paste(img_with_alpha.convert('RGB'))
+
+        except Exception as e:
+            logger.error(f"添加角落装饰失败: {e}")
+
+    @staticmethod
     def _load_and_paste_decoration(
         img: Image.Image,
         decoration_paths: list,
@@ -306,16 +361,34 @@ class SummaryImageGenerator:
         line_height = font_text.getbbox('测试')[3] - font_text.getbbox('测试')[1]
         summary_card_height = SummaryImageGenerator.CARD_PADDING * 2 + len(wrapped_lines) * (line_height + 8) + 50
 
-        # 计算称号区域高度
+        # 计算称号区域高度（需要先计算每个卡片的实际高度）
         if user_titles:
-            titles_section_height = 80 + len(user_titles) * 95  # 标题 + 卡片*数量
+            titles_section_height = 80  # 标题高度
+            max_reason_width = width - SummaryImageGenerator.PADDING * 2 - SummaryImageGenerator.CARD_PADDING * 2 - 140 - 60
+            for title_item in user_titles:
+                reason = title_item.get("reason", "")
+                reason_lines = SummaryImageGenerator._wrap_text(reason, max_reason_width, font_small)
+                # 卡片高度 = 上下边距 + 用户名行高 + 理由行数 * 行高
+                card_height = 40 + 40 + len(reason_lines) * 30
+                titles_section_height += card_height + 15  # 卡片高度 + 间距
 
-        # 计算金句区域高度
+        # 计算金句区域高度（需要先计算每个卡片的实际高度）
         if golden_quotes:
-            quotes_section_height = 80 + len(golden_quotes) * 180  # 标题 + 卡片*数量
+            quotes_section_height = 80  # 标题高度
+            max_quote_width = width - SummaryImageGenerator.PADDING * 2 - 50
+            for quote_item in golden_quotes:
+                content = quote_item.get("content", "")
+                reason = quote_item.get("reason", "")
+                quote_text = f'"{content}"'
+                quote_lines = SummaryImageGenerator._wrap_text(quote_text, max_quote_width, font_text)
+                reason_lines = SummaryImageGenerator._wrap_text(reason, max_quote_width, font_small)
+                # 卡片高度 = 上边距 + 金句内容 + 发言人 + 理由 + 下边距
+                card_height = 30 + len(quote_lines) * 35 + 35 + len(reason_lines) * 30 + 25
+                quotes_section_height += card_height + 15  # 卡片高度 + 间距
 
-        # 总高度
-        total_height = header_height + summary_card_height + titles_section_height + quotes_section_height + 100
+        # 总高度（增加底部装饰空间）
+        footer_height = 220  # 底部装饰区域高度
+        total_height = header_height + summary_card_height + titles_section_height + quotes_section_height + footer_height
 
         # 创建图片
         img = Image.new('RGB', (width, total_height), SummaryImageGenerator.BG_COLOR)
@@ -343,16 +416,37 @@ class SummaryImageGenerator:
         # 在标题左右两侧添加装饰图片
         plugin_dir = os.path.dirname(__file__)
         deco1_path = os.path.join(plugin_dir, "decoration1.png")
-        deco4_path = os.path.join(plugin_dir, "decoration4.png")
 
         # 左侧decoration1
         SummaryImageGenerator._load_and_paste_decoration(
-            img, [deco1_path], title_x - 150, 35, max_width=120, max_height=80
+            img, [deco1_path], title_x - 120, 40, max_width=100, max_height=70
         )
-        # 右侧decoration4
-        SummaryImageGenerator._load_and_paste_decoration(
-            img, [deco4_path], title_x + title_width + 150, 35, max_width=120, max_height=80
-        )
+        # 右侧decoration1（镜像翻转）
+        deco1_right = Image.open(deco1_path).convert("RGBA").transpose(Image.FLIP_LEFT_RIGHT)
+        temp = Image.new('RGBA', img.size, (0, 0, 0, 0))
+        # 缩放
+        w, h = deco1_right.size
+        scale = min(100 / w, 70 / h, 1.0)
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        if scale < 1.0:
+            deco1_right = deco1_right.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        paste_x = title_x + title_width + 120 - new_w // 2
+        paste_y = 40 + (70 - new_h) // 2
+        temp.paste(deco1_right, (paste_x, paste_y), deco1_right)
+        img_with_alpha = img.convert('RGBA')
+        img_with_alpha = Image.alpha_composite(img_with_alpha, temp)
+        img.paste(img_with_alpha.convert('RGB'))
+
+        # 添加小星星装饰
+        star_path = os.path.join(plugin_dir, "decoration_star.png")
+        if os.path.exists(star_path):
+            SummaryImageGenerator._load_and_paste_decoration(
+                img, [star_path], title_x - 200, 60, max_width=40, max_height=40
+            )
+            SummaryImageGenerator._load_and_paste_decoration(
+                img, [star_path], title_x + title_width + 200, 50, max_width=35, max_height=35
+            )
 
         # 绘制时间和统计信息
         if time_info or message_count > 0:
@@ -415,14 +509,23 @@ class SummaryImageGenerator:
                 horizontal=True
             )
 
-            # 在标题左侧添加decoration2
-            deco2_path = os.path.join(plugin_dir, "decoration2.png")
-            # 计算装饰图片位置：标题中心左侧，距离标题一半宽度再偏移100像素
+            # 在标题左侧添加decoration3（小头像）和星星
+            deco3_path = os.path.join(plugin_dir, "decoration3.png")
+            star_path = os.path.join(plugin_dir, "decoration_star.png")
+            # 计算装饰图片位置
             title_center_x = width // 2
-            deco_x = title_center_x - title_width // 2 - 70
+            deco_x = title_center_x - title_width // 2 - 60
             SummaryImageGenerator._load_and_paste_decoration(
-                img, [deco2_path], deco_x, y + 10, max_width=60, max_height=60
+                img, [deco3_path], deco_x, y + 15, max_width=50, max_height=50
             )
+            # 添加小星星点缀
+            if os.path.exists(star_path):
+                SummaryImageGenerator._load_and_paste_decoration(
+                    img, [star_path], deco_x - 35, y + 5, max_width=25, max_height=25
+                )
+                SummaryImageGenerator._load_and_paste_decoration(
+                    img, [star_path], deco_x + 45, y + 55, max_width=20, max_height=20
+                )
 
             # 绘制标题文字（白色，居中）
             title_bbox = font_section_title.getbbox(section_title)
@@ -441,16 +544,30 @@ class SummaryImageGenerator:
                 title_text = title_item.get("title", "")
                 reason = title_item.get("reason", "")
 
+                # 计算理由的实际高度
+                max_reason_width = card_width - 140 - 60  # 减去徽章宽度和边距
+                reason_lines = SummaryImageGenerator._wrap_text(reason, max_reason_width, font_small)
+                reason_line_height = font_small.getbbox('测试')[3] - font_small.getbbox('测试')[1]
+
+                # 动态计算卡片高度
+                card_height = 40 + 40 + len(reason_lines) * (reason_line_height + 6)
+                card_height = max(card_height, 100)  # 最小高度100
+
                 # 卡片背景
-                card_height = 80
+                card_coords = (card_x, y, card_x + card_width, y + card_height)
                 SummaryImageGenerator._draw_rounded_rectangle(
                     draw,
-                    (card_x, y, card_x + card_width, y + card_height),
+                    card_coords,
                     12,
                     fill=SummaryImageGenerator.CARD_BG,
                     outline=SummaryImageGenerator.CARD_BORDER,
                     width=1
                 )
+
+                # 添加角落装饰（使用sparkle）
+                sparkle_path = os.path.join(plugin_dir, "decoration_sparkle.png")
+                if os.path.exists(sparkle_path):
+                    SummaryImageGenerator._draw_card_corner_decoration(img, card_coords, sparkle_path)
 
                 # 左边徽章
                 badge_x = card_x + 20
@@ -479,14 +596,11 @@ class SummaryImageGenerator:
                 name_y = y + 15
                 draw.text((name_x, name_y), name, fill=SummaryImageGenerator.TEXT_COLOR, font=font_subtitle)
 
-                # 理由（自动换行）
+                # 理由（多行显示，不截断）
                 reason_y = y + 50
-                max_reason_width = card_width - (badge_width + 60)
-                reason_lines = SummaryImageGenerator._wrap_text(reason, max_reason_width, font_small)
-                reason_text = reason_lines[0] if reason_lines else reason  # 只显示第一行
-                if len(reason) > 25:
-                    reason_text = reason_text[:23] + "..."
-                draw.text((name_x, reason_y), reason_text, fill=SummaryImageGenerator.LIGHT_TEXT_COLOR, font=font_small)
+                for line in reason_lines:
+                    draw.text((name_x, reason_y), line, fill=SummaryImageGenerator.LIGHT_TEXT_COLOR, font=font_small)
+                    reason_y += reason_line_height + 6
 
                 y += card_height + 15
 
@@ -510,14 +624,20 @@ class SummaryImageGenerator:
                 horizontal=True
             )
 
-            # 在标题左侧添加decoration3
-            deco3_path = os.path.join(plugin_dir, "decoration3.png")
-            # 计算装饰图片位置：标题中心左侧，距离标题一半宽度再偏移100像素
+            # 在标题左侧添加引号装饰和decoration1
+            deco1_path = os.path.join(plugin_dir, "decoration1.png")
+            quote_path = os.path.join(plugin_dir, "decoration_quote.png")
+            # 计算装饰图片位置
             title_center_x = width // 2
-            deco_x = title_center_x - title_width // 2 - 70
+            deco_x = title_center_x - title_width // 2 - 60
             SummaryImageGenerator._load_and_paste_decoration(
-                img, [deco3_path], deco_x, y + 10, max_width=60, max_height=60
+                img, [deco1_path], deco_x, y + 15, max_width=50, max_height=50
             )
+            # 添加引号装饰
+            if os.path.exists(quote_path):
+                SummaryImageGenerator._load_and_paste_decoration(
+                    img, [quote_path], deco_x - 40, y + 20, max_width=30, max_height=30
+                )
 
             # 绘制标题文字（白色，居中）
             title_bbox = font_section_title.getbbox(section_title)
@@ -536,48 +656,82 @@ class SummaryImageGenerator:
                 sender = quote_item.get("sender", "")
                 reason = quote_item.get("reason", "")
 
-                # 限制长度
-                if len(content) > 40:
-                    content = content[:38] + "..."
-                if len(reason) > 25:
-                    reason = reason[:23] + "..."
+                # 不再限制长度，自动换行
+
+                # 计算金句内容和理由的实际高度
+                content_x = card_x + 25
+                max_quote_width = card_width - 50
+                quote_text = f'"{content}"'
+                quote_lines = SummaryImageGenerator._wrap_text(quote_text, max_quote_width, font_text)
+                reason_lines = SummaryImageGenerator._wrap_text(reason, max_quote_width, font_small)
+
+                quote_line_height = font_text.getbbox('测试')[3] - font_text.getbbox('测试')[1]
+                reason_line_height = font_small.getbbox('测试')[3] - font_small.getbbox('测试')[1]
+
+                # 动态计算卡片高度
+                card_height = 30 + len(quote_lines) * (quote_line_height + 8) + 35 + len(reason_lines) * (reason_line_height + 6) + 25
+                card_height = max(card_height, 160)  # 最小高度160
 
                 # 卡片背景
-                card_height = 160
+                card_coords = (card_x, y, card_x + card_width, y + card_height)
                 SummaryImageGenerator._draw_rounded_rectangle(
                     draw,
-                    (card_x, y, card_x + card_width, y + card_height),
+                    card_coords,
                     12,
                     fill=SummaryImageGenerator.QUOTE_BG,
                     outline=SummaryImageGenerator.CARD_BORDER,
                     width=1
                 )
 
-                # 金句内容（带引号）
-                content_x = card_x + 25
+                # 添加角落装饰（使用heart）
+                heart_path = os.path.join(plugin_dir, "decoration_heart.png")
+                if os.path.exists(heart_path):
+                    SummaryImageGenerator._draw_card_corner_decoration(img, card_coords, heart_path)
+
+                # 金句内容（带引号，多行显示）
                 content_y = y + 25
-                quote_text = f'"{content}"'
-
-                # 自动换行金句内容
-                max_quote_width = card_width - 50
-                quote_lines = SummaryImageGenerator._wrap_text(quote_text, max_quote_width, font_text)
-
-                for line in quote_lines[:2]:  # 最多显示2行
+                for line in quote_lines:
                     draw.text((content_x, content_y), line, fill=SummaryImageGenerator.QUOTE_TEXT, font=font_text)
-                    content_y += line_height + 5
+                    content_y += quote_line_height + 8
 
                 # 发言人
-                sender_y = y + 75
+                sender_y = content_y + 10
                 sender_text = f"—— {sender}"
                 draw.text((content_x, sender_y), sender_text, fill=SummaryImageGenerator.SUBTITLE_COLOR, font=font_small)
 
-                # 理由
-                reason_y = y + 100
-                draw.text((content_x, reason_y), reason, fill=SummaryImageGenerator.LIGHT_TEXT_COLOR, font=font_small)
+                # 理由（多行显示）
+                reason_y = sender_y + 30
+                for line in reason_lines:
+                    draw.text((content_x, reason_y), line, fill=SummaryImageGenerator.LIGHT_TEXT_COLOR, font=font_small)
+                    reason_y += reason_line_height + 6
 
                 y += card_height + 15
 
             y += 10
+
+        # ===== 底部装饰 =====
+        # 添加麦麦角色作为结尾装饰
+        deco2_path = os.path.join(plugin_dir, "decoration2.png")
+        if os.path.exists(deco2_path):
+            y += 20
+            SummaryImageGenerator._load_and_paste_decoration(
+                img, [deco2_path], width // 2, y, max_width=150, max_height=150
+            )
+            y += 170
+        else:
+            y += 30
+
+        # 添加一些装饰气泡
+        bubble_path = os.path.join(plugin_dir, "decoration_bubble.png")
+        if os.path.exists(bubble_path):
+            # 左侧气泡
+            SummaryImageGenerator._load_and_paste_decoration(
+                img, [bubble_path], 150, y - 100, max_width=60, max_height=60
+            )
+            # 右侧气泡
+            SummaryImageGenerator._load_and_paste_decoration(
+                img, [bubble_path], width - 150, y - 120, max_width=50, max_height=50
+            )
 
         # 转换为字节和base64
         img_byte_arr = io.BytesIO()
