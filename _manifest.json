@@ -4,8 +4,8 @@
   "version": "1.0.0",
   "description": "分析群聊聊天记录并生成智能总结，支持群聊整体总结和单个用户总结，可选择不同时间范围",
   "author": {
-    "name": "MaiBot开发团队",
-    "url": "https://github.com/Mai-with-u"
+    "name": "久远",
+    "url": "https://github.com/saberlights/chat_summary_plugin"
   },
   "license": "GPL-v3.0-or-later",
 
