@@ -149,7 +149,7 @@ class ChatSummaryCommand(BaseCommand):
                         # 如果配置为空，尝试使用插件目录下的默认图片
                         import os
                         plugin_dir = os.path.dirname(__file__)
-                        decoration_path = os.path.join(plugin_dir, "decoration1.png")
+                        decoration_path = os.path.join(plugin_dir, "decorations", "decoration1.png")
                         if not os.path.exists(decoration_path):
                             decoration_path = None
 
@@ -474,20 +474,17 @@ class ChatSummaryCommand(BaseCommand):
             users_info = "\n".join(users_text)
 
             # 构建 prompt
-            prompt = f"""请为以下群友分配合适的称号。
-
-可选称号：
-- **龙王**: 发言频繁但内容轻松的人
-- **技术大佬**: 经常讨论技术话题的人
-- **夜猫子**: 经常在深夜发言的人
-- **表情包军火库**: 经常发表情的人
-- **话题终结者**: 经常开启话题的人
-- **评论家**: 平均发言长度很长的人
-- **潜水员**: 发言很少但精准的人
-- **互动达人**: 经常回复别人的人
+            prompt = f"""请根据以下群友的数据，为他们创造有趣、贴切的称号。
 
 用户数据：
 {users_info}
+
+要求：
+- 称号必须是 **2-4个汉字**，简洁有力
+- 要根据用户的实际数据特征来创造称号，体现他们的聊天风格
+- 可以结合发言频率、时间习惯、表情使用、发言长度等特点
+- 称号要有创意、生动、有趣，可以带点调侃或梗
+- 例如：龙王、夜猫子、话痨、潜水员、表情帝、水群王、评论家、沉默者等
 
 **重要**：返回的JSON中不要包含emoji表情符号，理由部分要详细、有趣，60-80字左右。
 
@@ -495,7 +492,7 @@ class ChatSummaryCommand(BaseCommand):
 [
   {{
     "name": "用户名",
-    "title": "称号",
+    "title": "称号（2-4个汉字）",
     "reason": "获得此称号的详细原因，要生动有趣，可以加点调侃或梗（纯文字，无emoji，60-80字）"
   }}
 ]"""
@@ -908,7 +905,7 @@ class DailySummaryEventHandler(BaseEventHandler):
                                 import os
                                 plugin_dir = os.path.dirname(os.path.dirname(__file__))
                                 plugin_dir = os.path.join(plugin_dir, "chat_summary_plugin")
-                                decoration_path = os.path.join(plugin_dir, "decoration1.png")
+                                decoration_path = os.path.join(plugin_dir, "decorations", "decoration1.png")
                                 if not os.path.exists(decoration_path):
                                     decoration_path = None
 
@@ -1128,20 +1125,17 @@ class DailySummaryEventHandler(BaseEventHandler):
             users_info = "\n".join(users_text)
 
             # 构建 prompt
-            prompt = f"""请为以下群友分配合适的称号。
-
-可选称号：
-- **龙王**: 发言频繁但内容轻松的人
-- **技术大佬**: 经常讨论技术话题的人
-- **夜猫子**: 经常在深夜发言的人
-- **表情包军火库**: 经常发表情的人
-- **话题终结者**: 经常开启话题的人
-- **评论家**: 平均发言长度很长的人
-- **潜水员**: 发言很少但精准的人
-- **互动达人**: 经常回复别人的人
+            prompt = f"""请根据以下群友的数据，为他们创造有趣、贴切的称号。
 
 用户数据：
 {users_info}
+
+要求：
+- 称号必须是 **2-4个汉字**，简洁有力
+- 要根据用户的实际数据特征来创造称号，体现他们的聊天风格
+- 可以结合发言频率、时间习惯、表情使用、发言长度等特点
+- 称号要有创意、生动、有趣，可以带点调侃或梗
+- 例如：龙王、夜猫子、话痨、潜水员、表情帝、水群王、评论家、沉默者等
 
 **重要**：返回的JSON中不要包含emoji表情符号，理由部分要详细、有趣，60-80字左右。
 
@@ -1149,7 +1143,7 @@ class DailySummaryEventHandler(BaseEventHandler):
 [
   {{
     "name": "用户名",
-    "title": "称号",
+    "title": "称号（2-4个汉字）",
     "reason": "获得此称号的详细原因，要生动有趣，可以加点调侃或梗（纯文字，无emoji，60-80字）"
   }}
 ]"""
