@@ -503,7 +503,6 @@ class ChatSummaryCommand(BaseCommand):
                 prompt=prompt,
                 model_config=model_task_config,
                 request_type="plugin.chat_summary.titles",
-                temperature=0.6,
             )
 
             if not success:
@@ -580,28 +579,35 @@ class ChatSummaryCommand(BaseCommand):
             # 构建 prompt
             prompt = f"""请从以下群聊记录中挑选出 **3-5** 句最有趣、最精彩的「金句」。
 
-金句标准：
-- 有趣的梗或笑点
-- 精彩的吐槽或评论
-- 有冲击力的观点
-- 让人印象深刻的发言
+金句标准（按优先级排序）：
+1. **神回复/接梗高手** - 接得巧妙、幽默的回复，或冷不丁的神转折
+2. **有趣的梗或笑点** - 让人会心一笑的发言，带有网络梗或群内梗
+3. **精彩的吐槽** - 犀利、搞笑、一针见血的评论
+4. **有冲击力/反差感的观点** - 出人意料、发人深省、或特别离谱的发言
+5. **高情商/低情商发言** - 特别会说话或特别不会说话的典型
+
+**重要限制**：
+- 每个金句必须来自不同的发言人，不能有重复
+- 避免选择平淡无奇的陈述句（如"好的""知道了""在干嘛"）
+- 避免选择单纯的问候语或表达情绪的短句
+- 优先选择有上下文趣味、能独立成梗的句子
 
 对于每个金句，请提供：
 1. **原文内容**（不要包含emoji表情符号）
 2. **发言人昵称**
-3. **选择理由**（80-100字，详细说明为什么这句话有趣、精彩或值得记录）
+3. **选择理由**（60-80字，简要说明这句话的笑点、梗、或精彩之处）
 
 群聊记录：
 {messages_text}
 
-**重要**：不要在JSON中包含emoji表情符号（如🔪😀等），请用文字描述代替。理由部分要详细、有趣，可以分析这句话的梗、笑点、或为什么让人印象深刻。
+**重要**：不要在JSON中包含emoji表情符号（如🔪😀等），请用文字描述代替。理由部分要简洁有趣，点出这句话的梗或笑点即可。
 
 请返回 JSON 格式（不要markdown代码块）：
 [
   {{
     "content": "金句原文（纯文字，无emoji）",
     "sender": "发言人昵称",
-    "reason": "详细的选择理由，分析这句话为什么有趣或精彩（纯文字，无emoji，80-100字）"
+    "reason": "简要的选择理由，点出这句话为什么有趣或精彩（纯文字，无emoji，60-80字）"
   }}
 ]"""
 
@@ -611,7 +617,6 @@ class ChatSummaryCommand(BaseCommand):
                 prompt=prompt,
                 model_config=model_task_config,
                 request_type="plugin.chat_summary.quotes",
-                temperature=0.7,
             )
 
             if not success:
@@ -1021,7 +1026,6 @@ class DailySummaryEventHandler(BaseEventHandler):
                 prompt=prompt,
                 model_config=model_task_config,
                 request_type="plugin.chat_summary.auto",
-                temperature=0.7,
             )
 
             if not success:
@@ -1154,7 +1158,6 @@ class DailySummaryEventHandler(BaseEventHandler):
                 prompt=prompt,
                 model_config=model_task_config,
                 request_type="plugin.chat_summary.titles",
-                temperature=0.6,
             )
 
             if not success:
@@ -1231,28 +1234,35 @@ class DailySummaryEventHandler(BaseEventHandler):
             # 构建 prompt
             prompt = f"""请从以下群聊记录中挑选出 **3-5** 句最有趣、最精彩的「金句」。
 
-金句标准：
-- 有趣的梗或笑点
-- 精彩的吐槽或评论
-- 有冲击力的观点
-- 让人印象深刻的发言
+金句标准（按优先级排序）：
+1. **神回复/接梗高手** - 接得巧妙、幽默的回复，或冷不丁的神转折
+2. **有趣的梗或笑点** - 让人会心一笑的发言，带有网络梗或群内梗
+3. **精彩的吐槽** - 犀利、搞笑、一针见血的评论
+4. **有冲击力/反差感的观点** - 出人意料、发人深省、或特别离谱的发言
+5. **高情商/低情商发言** - 特别会说话或特别不会说话的典型
+
+**重要限制**：
+- 每个金句必须来自不同的发言人，不能有重复
+- 避免选择平淡无奇的陈述句（如"好的""知道了""在干嘛"）
+- 避免选择单纯的问候语或表达情绪的短句
+- 优先选择有上下文趣味、能独立成梗的句子
 
 对于每个金句，请提供：
 1. **原文内容**（不要包含emoji表情符号）
 2. **发言人昵称**
-3. **选择理由**（80-100字，详细说明为什么这句话有趣、精彩或值得记录）
+3. **选择理由**（60-80字，简要说明这句话的笑点、梗、或精彩之处）
 
 群聊记录：
 {messages_text}
 
-**重要**：不要在JSON中包含emoji表情符号（如🔪😀等），请用文字描述代替。理由部分要详细、有趣，可以分析这句话的梗、笑点、或为什么让人印象深刻。
+**重要**：不要在JSON中包含emoji表情符号（如🔪😀等），请用文字描述代替。理由部分要简洁有趣，点出这句话的梗或笑点即可。
 
 请返回 JSON 格式（不要markdown代码块）：
 [
   {{
     "content": "金句原文（纯文字，无emoji）",
     "sender": "发言人昵称",
-    "reason": "详细的选择理由，分析这句话为什么有趣或精彩（纯文字，无emoji，80-100字）"
+    "reason": "简要的选择理由，点出这句话为什么有趣或精彩（纯文字，无emoji，60-80字）"
   }}
 ]"""
 
@@ -1262,7 +1272,6 @@ class DailySummaryEventHandler(BaseEventHandler):
                 prompt=prompt,
                 model_config=model_task_config,
                 request_type="plugin.chat_summary.quotes",
-                temperature=0.7,
             )
 
             if not success:
