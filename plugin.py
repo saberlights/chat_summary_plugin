@@ -23,6 +23,7 @@ import json
 from datetime import datetime, timedelta
 from typing import List, Tuple, Optional, Dict
 from collections import Counter
+from PIL import Image
 
 from src.plugin_system import (
     BasePlugin,
@@ -165,23 +166,24 @@ class ChatSummaryCommand(BaseCommand):
                         golden_quotes=golden_quotes
                     )
 
-                    # 使用 file:// URL 方式发送图片
+                    # 发送图片
                     try:
-                        # 转换为 file:// URL（使用绝对路径）
-                        file_url = f"file://{img_path}"
-                        await self.send_custom("imageurl", file_url)
+                        if not os.path.exists(img_path):
+                            raise FileNotFoundError(f"图片文件不存在: {img_path}")
 
-                        # 等待一段时间后再清理，确保图片已经上传
-                        import asyncio
-                        await asyncio.sleep(3)
+                        with open(img_path, 'rb') as f:
+                            img_data = f.read()
+
+                        import base64
+                        img_base64 = base64.b64encode(img_data).decode('utf-8')
+                        await self.send_custom("image", img_base64)
+                        await asyncio.sleep(2)
                     finally:
-                        # 发送完成后清理临时文件
                         try:
-                            import os
                             if os.path.exists(img_path):
                                 os.remove(img_path)
-                        except Exception:
-                            pass  # 静默忽略清理失败
+                        except Exception as e:
+                            logger.warning(f"清理临时图片失败: {e}")
 
                 except Exception as e:
                     logger.error(f"生成图片失败，使用文本输出: {e}", exc_info=True)
@@ -942,27 +944,24 @@ class DailySummaryEventHandler(BaseEventHandler):
                                 golden_quotes=golden_quotes
                             )
 
-                            # 使用 file:// URL 方式发送图片
+                            # 发送图片
                             try:
-                                import os
-                                if os.path.exists(img_path):
-                                    # 转换为 file:// URL
-                                    file_url = f"file://{img_path}"
-                                    await send_api.image_to_stream(file_url, chat_id, storage_message=False)
+                                if not os.path.exists(img_path):
+                                    raise FileNotFoundError(f"图片文件不存在: {img_path}")
 
-                                    # 等待一段时间后再清理，确保图片已经上传
-                                    import asyncio
-                                    await asyncio.sleep(3)
-                                else:
-                                    logger.error(f"临时图片文件不存在: {img_path}")
+                                with open(img_path, 'rb') as f:
+                                    img_data = f.read()
+
+                                import base64
+                                img_base64 = base64.b64encode(img_data).decode('utf-8')
+                                await send_api.image_to_stream(img_base64, chat_id, storage_message=False)
+                                await asyncio.sleep(2)
                             finally:
-                                # 发送完成后清理临时文件
                                 try:
-                                    import os
                                     if os.path.exists(img_path):
                                         os.remove(img_path)
-                                except Exception:
-                                    pass  # 静默忽略清理失败
+                                except Exception as e:
+                                    logger.warning(f"清理临时图片失败: {e}")
 
                         except Exception as e:
                             logger.error(f"生成图片失败，使用文本输出: {e}", exc_info=True)

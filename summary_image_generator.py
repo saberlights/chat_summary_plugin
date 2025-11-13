@@ -1149,11 +1149,15 @@ class SummaryImageGenerator:
 
             # 生成唯一文件名
             import uuid
-            filename = f"summary_{uuid.uuid4().hex[:8]}.png"
+            filename = f"summary_{uuid.uuid4().hex[:8]}.jpg"
             img_path = os.path.join(images_dir, filename)
 
             # 保存图片
-            img.save(img_path, format='PNG', quality=95)
+            img.save(img_path, format='JPEG', quality=90, optimize=True)
+
+            if not os.path.exists(img_path):
+                raise IOError(f"图片保存失败")
+
             return img_path
         except Exception as e:
             logger.error(f"保存图片失败: {e}", exc_info=True)
