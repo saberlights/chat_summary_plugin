@@ -1140,8 +1140,8 @@ class SummaryImageGenerator:
         try:
             # 获取项目根目录
             current_dir = os.path.dirname(os.path.abspath(__file__))
-            # 向上三级到达 MaiBot 目录
-            project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+            # 向上两级到达 MaiBot 目录
+            project_root = os.path.dirname(os.path.dirname(current_dir))
             images_dir = os.path.join(project_root, "data", "images")
 
             # 确保目录存在
