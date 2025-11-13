@@ -153,7 +153,8 @@ class ChatSummaryCommand(BaseCommand):
                         if not os.path.exists(decoration_path):
                             decoration_path = None
 
-                    _, img_base64 = SummaryImageGenerator.generate_summary_image(
+                    # 生成图片并获取临时文件路径
+                    img_path = SummaryImageGenerator.generate_summary_image(
                         title=title,
                         summary_text=summary,
                         time_info=datetime.now().strftime("%Y-%m-%d"),
@@ -164,8 +165,23 @@ class ChatSummaryCommand(BaseCommand):
                         golden_quotes=golden_quotes
                     )
 
-                    # 发送图片
-                    await self.send_image(img_base64)
+                    # 使用 file:// URL 方式发送图片
+                    try:
+                        # 转换为 file:// URL（使用绝对路径）
+                        file_url = f"file://{img_path}"
+                        await self.send_custom("imageurl", file_url)
+
+                        # 等待一段时间后再清理，确保图片已经上传
+                        import asyncio
+                        await asyncio.sleep(3)
+                    finally:
+                        # 发送完成后清理临时文件
+                        try:
+                            import os
+                            if os.path.exists(img_path):
+                                os.remove(img_path)
+                        except Exception:
+                            pass  # 静默忽略清理失败
 
                 except Exception as e:
                     logger.error(f"生成图片失败，使用文本输出: {e}", exc_info=True)
@@ -914,7 +930,8 @@ class DailySummaryEventHandler(BaseEventHandler):
                                 if not os.path.exists(decoration_path):
                                     decoration_path = None
 
-                            _, img_base64 = SummaryImageGenerator.generate_summary_image(
+                            # 生成图片并获取临时文件路径
+                            img_path = SummaryImageGenerator.generate_summary_image(
                                 title="📊 今日群聊总结",
                                 summary_text=summary,
                                 time_info=datetime.now().strftime("%Y-%m-%d"),
@@ -925,8 +942,27 @@ class DailySummaryEventHandler(BaseEventHandler):
                                 golden_quotes=golden_quotes
                             )
 
-                            # 发送图片
-                            await send_api.image_to_stream(img_base64, chat_id, storage_message=False)
+                            # 使用 file:// URL 方式发送图片
+                            try:
+                                import os
+                                if os.path.exists(img_path):
+                                    # 转换为 file:// URL
+                                    file_url = f"file://{img_path}"
+                                    await send_api.image_to_stream(file_url, chat_id, storage_message=False)
+
+                                    # 等待一段时间后再清理，确保图片已经上传
+                                    import asyncio
+                                    await asyncio.sleep(3)
+                                else:
+                                    logger.error(f"临时图片文件不存在: {img_path}")
+                            finally:
+                                # 发送完成后清理临时文件
+                                try:
+                                    import os
+                                    if os.path.exists(img_path):
+                                        os.remove(img_path)
+                                except Exception:
+                                    pass  # 静默忽略清理失败
 
                         except Exception as e:
                             logger.error(f"生成图片失败，使用文本输出: {e}", exc_info=True)

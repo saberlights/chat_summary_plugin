@@ -6,6 +6,7 @@
 import os
 import io
 import base64
+import tempfile
 from typing import Tuple, List, Optional
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
@@ -449,7 +450,7 @@ class SummaryImageGenerator:
         decoration_image_path: str = None,
         user_titles: list = None,
         golden_quotes: list = None
-    ) -> Tuple[bytes, str]:
+    ) -> str:
         """生成聊天总结图片 - 霓虹赛博朋克风格
 
         Args:
@@ -462,6 +463,9 @@ class SummaryImageGenerator:
             decoration_image_path: 装饰图片路径（暂不使用）
             user_titles: 群友称号列表
             golden_quotes: 金句列表
+
+        Returns:
+            str: 临时图片文件的绝对路径
         """
         if width is None:
             width = SummaryImageGenerator.WIDTH
@@ -1129,11 +1133,28 @@ class SummaryImageGenerator:
                 SummaryImageGenerator.BORDER_BLUE
             )
 
-        # 转换为RGB并保存
+        # 转换为RGB并保存到项目 images 目录
         img = img.convert('RGB')
-        img_byte_arr = io.BytesIO()
-        img.save(img_byte_arr, format='PNG', quality=95)
-        img_bytes = img_byte_arr.getvalue()
-        img_base64 = base64.b64encode(img_bytes).decode('utf-8')
 
-        return img_bytes, img_base64
+        # 创建临时文件，保存到项目的 data/images 目录
+        try:
+            # 获取项目根目录
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            # 向上三级到达 MaiBot 目录
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
+            images_dir = os.path.join(project_root, "data", "images")
+
+            # 确保目录存在
+            os.makedirs(images_dir, exist_ok=True)
+
+            # 生成唯一文件名
+            import uuid
+            filename = f"summary_{uuid.uuid4().hex[:8]}.png"
+            img_path = os.path.join(images_dir, filename)
+
+            # 保存图片
+            img.save(img_path, format='PNG', quality=95)
+            return img_path
+        except Exception as e:
+            logger.error(f"保存图片失败: {e}", exc_info=True)
+            raise
