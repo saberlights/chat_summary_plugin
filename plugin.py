@@ -40,7 +40,7 @@ from src.plugin_system import (
 )
 from src.common.database.database_model import Messages
 from src.config.config import model_config
-from .summary_image_generator import SummaryImageGenerator
+from .core import SummaryImageGenerator, ChatAnalysisUtils
 
 logger = get_logger("chat_summary_plugin")
 
@@ -116,7 +116,17 @@ class ChatSummaryCommand(BaseCommand):
                 try:
                     # 准备图片信息
                     if target_user:
-                        title = f"@{target_user} {time_range}的聊天总结"
+                        # 从消息记录中获取用户的实际昵称或群名片
+                        user_display_name = target_user  # 默认使用传入的值
+                        if messages:
+                            # 优先使用群名片，其次使用昵称
+                            first_msg = messages[0]
+                            user_display_name = (
+                                first_msg.get("user_cardname") or
+                                first_msg.get("user_nickname") or
+                                target_user
+                            )
+                        title = f"{user_display_name} {time_range}的聊天总结"
                     else:
                         title = f"{time_range}的群聊总结"
 
@@ -124,6 +134,7 @@ class ChatSummaryCommand(BaseCommand):
                     participant_count = 0
                     user_titles = []
                     golden_quotes = []
+                    hourly_distribution = {}
 
                     if not target_user:
                         participants = set()
@@ -134,25 +145,25 @@ class ChatSummaryCommand(BaseCommand):
                         participant_count = len(participants)
 
                         # 分析用户统计（仅群聊总结时）
-                        user_stats = self._analyze_user_stats(messages)
+                        user_stats = ChatAnalysisUtils.analyze_user_stats(messages)
+
+                        # 计算24小时发言分布
+                        from collections import Counter
+                        hourly_distribution = Counter()
+                        for msg in messages:
+                            timestamp = msg.get("time", 0)
+                            hour = datetime.fromtimestamp(timestamp).hour
+                            hourly_distribution[hour] += 1
+                        # 转换为普通字典
+                        hourly_distribution = dict(hourly_distribution)
 
                         # 分析群友称号（如果启用）
                         if self.get_config("summary.enable_user_titles", True):
-                            user_titles = await self._analyze_user_titles(messages, user_stats) or []
+                            user_titles = await ChatAnalysisUtils.analyze_user_titles(messages, user_stats) or []
 
                         # 分析金句（如果启用）
                         if self.get_config("summary.enable_golden_quotes", True):
-                            golden_quotes = await self._analyze_golden_quotes(messages) or []
-
-                    # 生成图片
-                    decoration_path = self.get_config("summary.decoration_image_path", "")
-                    if not decoration_path:
-                        # 如果配置为空，尝试使用插件目录下的默认图片
-                        import os
-                        plugin_dir = os.path.dirname(__file__)
-                        decoration_path = os.path.join(plugin_dir, "decorations", "decoration1.png")
-                        if not os.path.exists(decoration_path):
-                            decoration_path = None
+                            golden_quotes = await ChatAnalysisUtils.analyze_golden_quotes(messages) or []
 
                     # 生成图片并获取临时文件路径
                     img_path = SummaryImageGenerator.generate_summary_image(
@@ -161,9 +172,9 @@ class ChatSummaryCommand(BaseCommand):
                         time_info=datetime.now().strftime("%Y-%m-%d"),
                         message_count=len(messages),
                         participant_count=participant_count,
-                        decoration_image_path=decoration_path,
                         user_titles=user_titles,
-                        golden_quotes=golden_quotes
+                        golden_quotes=golden_quotes,
+                        hourly_distribution=hourly_distribution
                     )
 
                     # 发送图片
@@ -315,7 +326,7 @@ class ChatSummaryCommand(BaseCommand):
         """
         try:
             # 构建聊天记录文本
-            chat_text = self._format_messages(messages)
+            chat_text = ChatAnalysisUtils.format_messages(messages)
 
             # 获取人设和回复风格
             from src.config.config import global_config
@@ -330,6 +341,7 @@ class ChatSummaryCommand(BaseCommand):
                 max_words = self.get_config("summary.user_summary_max_words", 300)
 
                 prompt = f"""你是{bot_name}。{personality}
+{reply_style}
 
 以下是这个用户的聊天记录（{len(messages)}条消息）：
 {chat_text}
@@ -356,22 +368,22 @@ class ChatSummaryCommand(BaseCommand):
                         participants.add(nickname)
 
                 prompt = f"""你是{bot_name}。{personality}
+{reply_style}
 
-以下是今天的群聊记录（{len(messages)}条消息，{len(participants)}人参与）：
+以下是群聊记录（{len(messages)}条消息，{len(participants)}人参与）：
 {chat_text}
 
-请用你自己的说话方式，像和朋友聊天一样，自然地讲讲今天群里都发生了什么。不要列点，不要分段标题，就像你在给别人复述今天的群聊一样。
+请像给朋友讲故事一样复述群里发生了什么。
 
 要求：
-- 用口语化、轻松的语气，像讲故事一样流畅自然
-- 把有意思的对话、笑点、梗、精彩发言自然地穿插进去
-- **重点**：对于有价值的讨论点，稍微详细讲讲，不要只说"谁和谁讨论了什么"，而要说出讨论的具体内容、有趣的观点或结论
-- **提及主体**：说清楚是哪个群友做了什么事、说了什么话，让没看聊天记录的人也能知道发生了什么
-- 可以适当加点你自己的评论或吐槽
-- 不要用"首先""其次""总之"这种生硬的词
-- 字数{max_words}字以内
+1. 按时间顺序讲，保持连贯性
+2. 精彩内容详细说，平淡内容略过
+3. 对话要说清谁说了什么、谁怎么回的
+4. 必须有具体人名和具体内容，不要抽象描述
+5. 口语化，不要用"首先""其次""然后""总之"这类词
+6. {max_words}字内，内容水就少说
 
-直接开始讲，不要标题，不要"今天群里..."开头，想怎么说就怎么说。"""
+直接开始，不要标题。"""
 
             # 使用LLM生成总结
             # 使用主回复模型 (replyer)
@@ -393,287 +405,6 @@ class ChatSummaryCommand(BaseCommand):
         except Exception as e:
             logger.error(f"生成聊天记录总结出错: {e}", exc_info=True)
             return None
-
-    def _format_messages(self, messages: List[dict]) -> str:
-        """格式化聊天记录为文本
-
-        Args:
-            messages: 聊天记录列表
-
-        Returns:
-            格式化的聊天记录文本
-        """
-        formatted = []
-        for msg in messages:
-            timestamp = msg.get("time", 0)
-            time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M:%S")
-            nickname = msg.get("user_nickname", "未知用户")
-            cardname = msg.get("user_cardname", "")
-            display_name = cardname if cardname else nickname
-            text = msg.get("processed_plain_text", "")
-
-            if text:
-                formatted.append(f"[{time_str}] {display_name}: {text}")
-
-        return "\n".join(formatted)
-
-    def _analyze_user_stats(self, messages: List[dict]) -> Dict[str, Dict]:
-        """分析用户统计数据
-
-        Returns:
-            用户统计字典，格式: {user_id: {nickname, message_count, char_count, emoji_count, ...}}
-        """
-        user_stats = {}
-
-        for msg in messages:
-            user_id = str(msg.get("user_id", ""))
-            if not user_id:
-                continue
-
-            nickname = msg.get("user_nickname", "未知用户")
-            text = msg.get("processed_plain_text", "")
-
-            if user_id not in user_stats:
-                user_stats[user_id] = {
-                    "nickname": nickname,
-                    "message_count": 0,
-                    "char_count": 0,
-                    "emoji_count": 0,
-                    "hours": Counter(),  # 各小时发言次数
-                }
-
-            stats = user_stats[user_id]
-            stats["message_count"] += 1
-            stats["char_count"] += len(text)
-
-            # 统计 emoji 数量（简单判断）
-            emoji_count = text.count('😀') + text.count('😁') + text.count('🤣')  # 简化处理
-            stats["emoji_count"] += emoji_count
-
-            # 统计发言时间
-            timestamp = msg.get("time", 0)
-            hour = datetime.fromtimestamp(timestamp).hour
-            stats["hours"][hour] += 1
-
-        return user_stats
-
-    async def _analyze_user_titles(self, messages: List[dict], user_stats: Dict) -> Optional[List[Dict]]:
-        """使用 LLM 分析群友称号
-
-        Returns:
-            称号列表，格式: [{name, title, reason}, ...]
-        """
-        try:
-            # 只分析发言 >= 5 条的用户
-            active_users = {
-                uid: stats for uid, stats in user_stats.items()
-                if stats["message_count"] >= 5
-            }
-
-            if not active_users:
-                return []
-
-            # 构建用户数据文本
-            users_text = []
-            for user_id, stats in sorted(active_users.items(),
-                                         key=lambda x: x[1]["message_count"],
-                                         reverse=True)[:8]:  # 最多8人
-                night_messages = sum(stats["hours"][h] for h in range(0, 6))
-                avg_chars = stats["char_count"] / stats["message_count"] if stats["message_count"] > 0 else 0
-                emoji_ratio = stats["emoji_count"] / stats["message_count"] if stats["message_count"] > 0 else 0
-                night_ratio = night_messages / stats["message_count"] if stats["message_count"] > 0 else 0
-
-                users_text.append(
-                    f"- {stats['nickname']}: "
-                    f"发言{stats['message_count']}条, 平均{avg_chars:.1f}字, "
-                    f"表情比例{emoji_ratio:.2f}, 夜间发言比例{night_ratio:.2f}"
-                )
-
-            users_info = "\n".join(users_text)
-
-            # 构建 prompt
-            prompt = f"""请根据以下群友的数据，为他们创造有趣、贴切的称号。
-
-用户数据：
-{users_info}
-
-要求：
-- 称号必须是 **2-4个汉字**，简洁有力
-- 要根据用户的实际数据特征来创造称号，体现他们的聊天风格
-- 可以结合发言频率、时间习惯、表情使用、发言长度等特点
-- 称号要有创意、生动、有趣，可以带点调侃或梗
-- 例如：龙王、夜猫子、话痨、潜水员、表情帝、水群王、评论家、沉默者等
-
-**重要**：返回的JSON中不要包含emoji表情符号，理由部分要详细、有趣，60-80字左右。
-
-请返回 JSON 格式（不要markdown代码块）：
-[
-  {{
-    "name": "用户名",
-    "title": "称号（2-4个汉字）",
-    "reason": "获得此称号的详细原因，要生动有趣，可以加点调侃或梗（纯文字，无emoji，60-80字）"
-  }}
-]"""
-
-            # 使用 LLM 生成
-            model_task_config = model_config.model_task_config.replyer
-            success, result, reasoning, model_name = await llm_api.generate_with_model(
-                prompt=prompt,
-                model_config=model_task_config,
-                request_type="plugin.chat_summary.titles",
-            )
-
-            if not success:
-                logger.error(f"LLM生成称号失败: {result}")
-                return []
-
-            # 解析 JSON
-            try:
-                # 去除可能的 markdown 代码块标记
-                result = result.strip()
-                if result.startswith("```"):
-                    result = result.split("```")[1]
-                    if result.startswith("json"):
-                        result = result[4:]
-                result = result.strip()
-
-                # 尝试直接解析,因为我们已经在prompt中要求不使用emoji
-                titles = json.loads(result)
-                return titles if isinstance(titles, list) else []
-            except json.JSONDecodeError as e:
-                logger.error(f"解析称号 JSON 失败: {e}, 尝试清理emoji后重试")
-                # 只有解析失败时才尝试清理emoji
-                try:
-                    import re
-                    # 只移除真正的emoji,使用更精确的模式
-                    emoji_pattern = re.compile(
-                        "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF\U00002702-\U000027B0\U000024C2-\U0001F251\U0001F900-\U0001F9FF]+",
-                        flags=re.UNICODE
-                    )
-                    result_cleaned = emoji_pattern.sub('', result)
-                    titles = json.loads(result_cleaned)
-                    return titles if isinstance(titles, list) else []
-                except Exception as e2:
-                    logger.error(f"清理emoji后仍然失败: {e2}, 原文: {result[:200]}")
-                    return []
-
-        except Exception as e:
-            logger.error(f"分析群友称号失败: {e}", exc_info=True)
-            return []
-
-    async def _analyze_golden_quotes(self, messages: List[dict]) -> Optional[List[Dict]]:
-        """使用 LLM 提取群聊金句（群圣经）
-
-        Returns:
-            金句列表，格式: [{content, sender, reason}, ...]
-        """
-        try:
-            # 提取适合的消息（长度5-100字）
-            interesting_messages = []
-            for msg in messages:
-                nickname = msg.get("user_nickname", "未知用户")
-                cardname = msg.get("user_cardname", "")
-                display_name = cardname if cardname else nickname
-                text = msg.get("processed_plain_text", "")
-                timestamp = msg.get("time", 0)
-                time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M")
-
-                if 5 <= len(text) <= 100 and not text.startswith(("http", "www", "/")):
-                    interesting_messages.append({
-                        "sender": display_name,
-                        "time": time_str,
-                        "content": text
-                    })
-
-            if not interesting_messages:
-                return []
-
-            # 构建消息文本
-            messages_text = "\n".join([
-                f"[{msg['time']}] {msg['sender']}: {msg['content']}"
-                for msg in interesting_messages
-            ])
-
-            # 构建 prompt
-            prompt = f"""请从以下群聊记录中挑选出 **3-5** 句最有趣、最精彩的「金句」。
-
-金句标准（按优先级排序）：
-1. **神回复/接梗高手** - 接得巧妙、幽默的回复，或冷不丁的神转折
-2. **有趣的梗或笑点** - 让人会心一笑的发言，带有网络梗或群内梗
-3. **精彩的吐槽** - 犀利、搞笑、一针见血的评论
-4. **有冲击力/反差感的观点** - 出人意料、发人深省、或特别离谱的发言
-5. **高情商/低情商发言** - 特别会说话或特别不会说话的典型
-
-**重要限制**：
-- 每个金句必须来自不同的发言人，不能有重复
-- 避免选择平淡无奇的陈述句（如"好的""知道了""在干嘛"）
-- 避免选择单纯的问候语或表达情绪的短句
-- 优先选择有上下文趣味、能独立成梗的句子
-
-对于每个金句，请提供：
-1. **原文内容**（不要包含emoji表情符号）
-2. **发言人昵称**
-3. **选择理由**（60-80字，简要说明这句话的笑点、梗、或精彩之处）
-
-群聊记录：
-{messages_text}
-
-**重要**：不要在JSON中包含emoji表情符号（如🔪😀等），请用文字描述代替。理由部分要简洁有趣，点出这句话的梗或笑点即可。
-
-请返回 JSON 格式（不要markdown代码块）：
-[
-  {{
-    "content": "金句原文（纯文字，无emoji）",
-    "sender": "发言人昵称",
-    "reason": "简要的选择理由，点出这句话为什么有趣或精彩（纯文字，无emoji，60-80字）"
-  }}
-]"""
-
-            # 使用 LLM 生成
-            model_task_config = model_config.model_task_config.replyer
-            success, result, reasoning, model_name = await llm_api.generate_with_model(
-                prompt=prompt,
-                model_config=model_task_config,
-                request_type="plugin.chat_summary.quotes",
-            )
-
-            if not success:
-                logger.error(f"LLM生成金句失败: {result}")
-                return []
-
-            # 解析 JSON
-            try:
-                # 去除可能的 markdown 代码块标记
-                result = result.strip()
-                if result.startswith("```"):
-                    result = result.split("```")[1]
-                    if result.startswith("json"):
-                        result = result[4:]
-                result = result.strip()
-
-                # 尝试直接解析,因为我们已经在prompt中要求不使用emoji
-                quotes = json.loads(result)
-                return quotes if isinstance(quotes, list) else []
-            except json.JSONDecodeError as e:
-                logger.error(f"解析金句 JSON 失败: {e}, 尝试清理emoji后重试")
-                # 只有解析失败时才尝试清理emoji
-                try:
-                    import re
-                    # 只移除真正的emoji,使用更精确的模式
-                    emoji_pattern = re.compile(
-                        "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF\U00002702-\U000027B0\U000024C2-\U0001F251\U0001F900-\U0001F9FF]+",
-                        flags=re.UNICODE
-                    )
-                    result_cleaned = emoji_pattern.sub('', result)
-                    quotes = json.loads(result_cleaned)
-                    return quotes if isinstance(quotes, list) else []
-                except Exception as e2:
-                    logger.error(f"清理emoji后仍然失败: {e2}, 原文: {result[:200]}")
-                    return []
-
-        except Exception as e:
-            logger.error(f"分析金句失败: {e}", exc_info=True)
-            return []
 
 
 class SummaryScheduler:
@@ -909,28 +640,27 @@ class DailySummaryEventHandler(BaseEventHandler):
                                     participants.add(nickname)
 
                             # 分析用户统计
-                            user_stats = self._analyze_user_stats(messages)
+                            user_stats = ChatAnalysisUtils.analyze_user_stats(messages)
                             user_titles = []
                             golden_quotes = []
 
+                            # 计算24小时发言分布
+                            from collections import Counter
+                            hourly_distribution = Counter()
+                            for msg in messages:
+                                timestamp = msg.get("time", 0)
+                                hour = datetime.fromtimestamp(timestamp).hour
+                                hourly_distribution[hour] += 1
+                            # 转换为普通字典
+                            hourly_distribution = dict(hourly_distribution)
+
                             # 分析群友称号（如果启用）
                             if self.get_config("summary.enable_user_titles", True):
-                                user_titles = await self._analyze_user_titles(messages, user_stats) or []
+                                user_titles = await ChatAnalysisUtils.analyze_user_titles(messages, user_stats) or []
 
                             # 分析金句（如果启用）
                             if self.get_config("summary.enable_golden_quotes", True):
-                                golden_quotes = await self._analyze_golden_quotes(messages) or []
-
-                            # 生成图片
-                            decoration_path = self.get_config("summary.decoration_image_path", "")
-                            if not decoration_path:
-                                # 如果配置为空，尝试使用插件目录下的默认图片
-                                import os
-                                plugin_dir = os.path.dirname(os.path.dirname(__file__))
-                                plugin_dir = os.path.join(plugin_dir, "chat_summary_plugin")
-                                decoration_path = os.path.join(plugin_dir, "decorations", "decoration1.png")
-                                if not os.path.exists(decoration_path):
-                                    decoration_path = None
+                                golden_quotes = await ChatAnalysisUtils.analyze_golden_quotes(messages) or []
 
                             # 生成图片并获取临时文件路径
                             img_path = SummaryImageGenerator.generate_summary_image(
@@ -939,9 +669,9 @@ class DailySummaryEventHandler(BaseEventHandler):
                                 time_info=datetime.now().strftime("%Y-%m-%d"),
                                 message_count=len(messages),
                                 participant_count=len(participants),
-                                decoration_image_path=decoration_path,
                                 user_titles=user_titles,
-                                golden_quotes=golden_quotes
+                                golden_quotes=golden_quotes,
+                                hourly_distribution=hourly_distribution
                             )
 
                             # 发送图片
@@ -1018,12 +748,13 @@ class DailySummaryEventHandler(BaseEventHandler):
         """为指定聊天记录生成总结"""
         try:
             # 构建聊天记录文本
-            chat_text = self._format_messages(messages)
+            chat_text = ChatAnalysisUtils.format_messages(messages)
 
-            # 获取人设
+            # 获取人设和回复风格
             from src.config.config import global_config
             bot_name = global_config.bot.nickname
             personality = global_config.personality.personality
+            reply_style = global_config.personality.reply_style
 
             # 获取字数限制
             max_words = self.get_config("summary.group_summary_max_words", 400)
@@ -1037,22 +768,22 @@ class DailySummaryEventHandler(BaseEventHandler):
 
             # 构建提示词
             prompt = f"""你是{bot_name}。{personality}
+{reply_style}
 
 以下是群聊记录（{len(messages)}条消息，{len(participants)}人参与）：
 {chat_text}
 
-请用你自己的说话方式，像和朋友聊天一样，自然地讲讲群里都发生了什么。不要列点，不要分段标题，就像你在给别人复述今天的群聊一样。
+请像给朋友讲故事一样复述群里发生了什么。
 
 要求：
-- 用口语化、轻松的语气，像讲故事一样流畅自然
-- 把有意思的对话、笑点、梗、精彩发言自然地穿插进去
-- **重点**：对于有价值的讨论点，稍微详细讲讲，不要只说"谁和谁讨论了什么"，而要说出讨论的具体内容、有趣的观点或结论
-- **提及主体**：说清楚是哪个群友做了什么事、说了什么话，让没看聊天记录的人也能知道发生了什么
-- 可以适当加点你自己的评论或吐槽
-- 不要用"首先""其次""总之"这种生硬的词
-- 总结要简明扼要，{max_words}字以内
+1. 按时间顺序讲，保持连贯性
+2. 精彩内容详细说，平淡内容略过
+3. 对话要说清谁说了什么、谁怎么回的
+4. 必须有具体人名和具体内容，不要抽象描述
+5. 口语化，不要用"首先""其次""然后""总之"这类词
+6. {max_words}字内，内容水就少说
 
-直接开始讲，不要标题，不要"今天群里..."开头，想怎么说就怎么说。"""
+直接开始，不要标题。"""
 
             # 使用LLM生成总结
             model_task_config = model_config.model_task_config.replyer
@@ -1072,280 +803,6 @@ class DailySummaryEventHandler(BaseEventHandler):
         except Exception as e:
             logger.error(f"生成聊天总结出错: {e}", exc_info=True)
             return None
-
-    def _format_messages(self, messages: List[dict]) -> str:
-        """格式化聊天记录为文本"""
-        formatted = []
-        for msg in messages:
-            timestamp = msg.get("time", 0)
-            time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M:%S")
-            nickname = msg.get("user_nickname", "未知用户")
-            cardname = msg.get("user_cardname", "")
-            display_name = cardname if cardname else nickname
-            text = msg.get("processed_plain_text", "")
-
-            if text:
-                formatted.append(f"[{time_str}] {display_name}: {text}")
-
-        return "\n".join(formatted)
-
-    def _analyze_user_stats(self, messages: List[dict]) -> Dict[str, Dict]:
-        """分析用户统计数据
-
-        Returns:
-            用户统计字典，格式: {user_id: {nickname, message_count, char_count, emoji_count, ...}}
-        """
-        user_stats = {}
-
-        for msg in messages:
-            user_id = str(msg.get("user_id", ""))
-            if not user_id:
-                continue
-
-            nickname = msg.get("user_nickname", "未知用户")
-            text = msg.get("processed_plain_text", "")
-
-            if user_id not in user_stats:
-                user_stats[user_id] = {
-                    "nickname": nickname,
-                    "message_count": 0,
-                    "char_count": 0,
-                    "emoji_count": 0,
-                    "hours": Counter(),  # 各小时发言次数
-                }
-
-            stats = user_stats[user_id]
-            stats["message_count"] += 1
-            stats["char_count"] += len(text)
-
-            # 统计 emoji 数量（简单判断）
-            emoji_count = text.count('😀') + text.count('😁') + text.count('🤣')  # 简化处理
-            stats["emoji_count"] += emoji_count
-
-            # 统计发言时间
-            timestamp = msg.get("time", 0)
-            hour = datetime.fromtimestamp(timestamp).hour
-            stats["hours"][hour] += 1
-
-        return user_stats
-
-    async def _analyze_user_titles(self, messages: List[dict], user_stats: Dict) -> Optional[List[Dict]]:
-        """使用 LLM 分析群友称号
-
-        Returns:
-            称号列表，格式: [{name, title, reason}, ...]
-        """
-        try:
-            # 只分析发言 >= 5 条的用户
-            active_users = {
-                uid: stats for uid, stats in user_stats.items()
-                if stats["message_count"] >= 5
-            }
-
-            if not active_users:
-                return []
-
-            # 构建用户数据文本
-            users_text = []
-            for user_id, stats in sorted(active_users.items(),
-                                         key=lambda x: x[1]["message_count"],
-                                         reverse=True)[:8]:  # 最多8人
-                night_messages = sum(stats["hours"][h] for h in range(0, 6))
-                avg_chars = stats["char_count"] / stats["message_count"] if stats["message_count"] > 0 else 0
-                emoji_ratio = stats["emoji_count"] / stats["message_count"] if stats["message_count"] > 0 else 0
-                night_ratio = night_messages / stats["message_count"] if stats["message_count"] > 0 else 0
-
-                users_text.append(
-                    f"- {stats['nickname']}: "
-                    f"发言{stats['message_count']}条, 平均{avg_chars:.1f}字, "
-                    f"表情比例{emoji_ratio:.2f}, 夜间发言比例{night_ratio:.2f}"
-                )
-
-            users_info = "\n".join(users_text)
-
-            # 构建 prompt
-            prompt = f"""请根据以下群友的数据，为他们创造有趣、贴切的称号。
-
-用户数据：
-{users_info}
-
-要求：
-- 称号必须是 **2-4个汉字**，简洁有力
-- 要根据用户的实际数据特征来创造称号，体现他们的聊天风格
-- 可以结合发言频率、时间习惯、表情使用、发言长度等特点
-- 称号要有创意、生动、有趣，可以带点调侃或梗
-- 例如：龙王、夜猫子、话痨、潜水员、表情帝、水群王、评论家、沉默者等
-
-**重要**：返回的JSON中不要包含emoji表情符号，理由部分要详细、有趣，60-80字左右。
-
-请返回 JSON 格式（不要markdown代码块）：
-[
-  {{
-    "name": "用户名",
-    "title": "称号（2-4个汉字）",
-    "reason": "获得此称号的详细原因，要生动有趣，可以加点调侃或梗（纯文字，无emoji，60-80字）"
-  }}
-]"""
-
-            # 使用 LLM 生成
-            model_task_config = model_config.model_task_config.replyer
-            success, result, reasoning, model_name = await llm_api.generate_with_model(
-                prompt=prompt,
-                model_config=model_task_config,
-                request_type="plugin.chat_summary.titles",
-            )
-
-            if not success:
-                logger.error(f"LLM生成称号失败: {result}")
-                return []
-
-            # 解析 JSON
-            try:
-                # 去除可能的 markdown 代码块标记
-                result = result.strip()
-                if result.startswith("```"):
-                    result = result.split("```")[1]
-                    if result.startswith("json"):
-                        result = result[4:]
-                result = result.strip()
-
-                # 尝试直接解析,因为我们已经在prompt中要求不使用emoji
-                titles = json.loads(result)
-                return titles if isinstance(titles, list) else []
-            except json.JSONDecodeError as e:
-                logger.error(f"解析称号 JSON 失败: {e}, 尝试清理emoji后重试")
-                # 只有解析失败时才尝试清理emoji
-                try:
-                    import re
-                    # 只移除真正的emoji,使用更精确的模式
-                    emoji_pattern = re.compile(
-                        "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF\U00002702-\U000027B0\U000024C2-\U0001F251\U0001F900-\U0001F9FF]+",
-                        flags=re.UNICODE
-                    )
-                    result_cleaned = emoji_pattern.sub('', result)
-                    titles = json.loads(result_cleaned)
-                    return titles if isinstance(titles, list) else []
-                except Exception as e2:
-                    logger.error(f"清理emoji后仍然失败: {e2}, 原文: {result[:200]}")
-                    return []
-
-        except Exception as e:
-            logger.error(f"分析群友称号失败: {e}", exc_info=True)
-            return []
-
-    async def _analyze_golden_quotes(self, messages: List[dict]) -> Optional[List[Dict]]:
-        """使用 LLM 提取群聊金句（群圣经）
-
-        Returns:
-            金句列表，格式: [{content, sender, reason}, ...]
-        """
-        try:
-            # 提取适合的消息（长度5-100字）
-            interesting_messages = []
-            for msg in messages:
-                nickname = msg.get("user_nickname", "未知用户")
-                cardname = msg.get("user_cardname", "")
-                display_name = cardname if cardname else nickname
-                text = msg.get("processed_plain_text", "")
-                timestamp = msg.get("time", 0)
-                time_str = datetime.fromtimestamp(timestamp).strftime("%H:%M")
-
-                if 5 <= len(text) <= 100 and not text.startswith(("http", "www", "/")):
-                    interesting_messages.append({
-                        "sender": display_name,
-                        "time": time_str,
-                        "content": text
-                    })
-
-            if not interesting_messages:
-                return []
-
-            # 构建消息文本
-            messages_text = "\n".join([
-                f"[{msg['time']}] {msg['sender']}: {msg['content']}"
-                for msg in interesting_messages
-            ])
-
-            # 构建 prompt
-            prompt = f"""请从以下群聊记录中挑选出 **3-5** 句最有趣、最精彩的「金句」。
-
-金句标准（按优先级排序）：
-1. **神回复/接梗高手** - 接得巧妙、幽默的回复，或冷不丁的神转折
-2. **有趣的梗或笑点** - 让人会心一笑的发言，带有网络梗或群内梗
-3. **精彩的吐槽** - 犀利、搞笑、一针见血的评论
-4. **有冲击力/反差感的观点** - 出人意料、发人深省、或特别离谱的发言
-5. **高情商/低情商发言** - 特别会说话或特别不会说话的典型
-
-**重要限制**：
-- 每个金句必须来自不同的发言人，不能有重复
-- 避免选择平淡无奇的陈述句（如"好的""知道了""在干嘛"）
-- 避免选择单纯的问候语或表达情绪的短句
-- 优先选择有上下文趣味、能独立成梗的句子
-
-对于每个金句，请提供：
-1. **原文内容**（不要包含emoji表情符号）
-2. **发言人昵称**
-3. **选择理由**（60-80字，简要说明这句话的笑点、梗、或精彩之处）
-
-群聊记录：
-{messages_text}
-
-**重要**：不要在JSON中包含emoji表情符号（如🔪😀等），请用文字描述代替。理由部分要简洁有趣，点出这句话的梗或笑点即可。
-
-请返回 JSON 格式（不要markdown代码块）：
-[
-  {{
-    "content": "金句原文（纯文字，无emoji）",
-    "sender": "发言人昵称",
-    "reason": "简要的选择理由，点出这句话为什么有趣或精彩（纯文字，无emoji，60-80字）"
-  }}
-]"""
-
-            # 使用 LLM 生成
-            model_task_config = model_config.model_task_config.replyer
-            success, result, reasoning, model_name = await llm_api.generate_with_model(
-                prompt=prompt,
-                model_config=model_task_config,
-                request_type="plugin.chat_summary.quotes",
-            )
-
-            if not success:
-                logger.error(f"LLM生成金句失败: {result}")
-                return []
-
-            # 解析 JSON
-            try:
-                # 去除可能的 markdown 代码块标记
-                result = result.strip()
-                if result.startswith("```"):
-                    result = result.split("```")[1]
-                    if result.startswith("json"):
-                        result = result[4:]
-                result = result.strip()
-
-                # 尝试直接解析,因为我们已经在prompt中要求不使用emoji
-                quotes = json.loads(result)
-                return quotes if isinstance(quotes, list) else []
-            except json.JSONDecodeError as e:
-                logger.error(f"解析金句 JSON 失败: {e}, 尝试清理emoji后重试")
-                # 只有解析失败时才尝试清理emoji
-                try:
-                    import re
-                    # 只移除真正的emoji,使用更精确的模式
-                    emoji_pattern = re.compile(
-                        "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF\U00002702-\U000027B0\U000024C2-\U0001F251\U0001F900-\U0001F9FF]+",
-                        flags=re.UNICODE
-                    )
-                    result_cleaned = emoji_pattern.sub('', result)
-                    quotes = json.loads(result_cleaned)
-                    return quotes if isinstance(quotes, list) else []
-                except Exception as e2:
-                    logger.error(f"清理emoji后仍然失败: {e2}, 原文: {result[:200]}")
-                    return []
-
-        except Exception as e:
-            logger.error(f"分析金句失败: {e}", exc_info=True)
-            return []
 
 
 @register_plugin

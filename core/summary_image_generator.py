@@ -11,6 +11,8 @@ from typing import Tuple, List, Optional
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
+from .constants import FontConfig, ColorScheme, LayoutConfig, DecorationConfig
+
 # 导入logger
 try:
     from src.common.logger import get_logger
@@ -23,69 +25,46 @@ except ImportError:
 class SummaryImageGenerator:
     """生成聊天总结图片 - 梦幻渐变风格"""
 
-    # 明亮渐变背景 - 温暖梦幻风格
-    BG_START = (240, 230, 255)        # 淡紫色
-    BG_MID = (255, 240, 245)          # 粉白色
-    BG_END = (245, 250, 255)          # 淡蓝白
+    # 从常量配置导入（保持向后兼容）
+    BG_START = ColorScheme.BG_START
+    BG_MID = ColorScheme.BG_MID
+    BG_END = ColorScheme.BG_END
+    CARD_BG = ColorScheme.CARD_BG
+    CARD_BG_LIGHT = ColorScheme.CARD_BG_LIGHT
+    BORDER_CYAN = ColorScheme.BORDER_CYAN
+    BORDER_MAGENTA = ColorScheme.BORDER_MAGENTA
+    BORDER_YELLOW = ColorScheme.BORDER_YELLOW
+    BORDER_GREEN = ColorScheme.BORDER_GREEN
+    BORDER_PINK = ColorScheme.BORDER_PINK
+    BORDER_ORANGE = ColorScheme.BORDER_ORANGE
+    BORDER_PURPLE = ColorScheme.BORDER_PURPLE
+    BORDER_BLUE = ColorScheme.BORDER_BLUE
+    TITLE_COLOR = ColorScheme.TITLE_COLOR
+    TEXT_COLOR = ColorScheme.TEXT_COLOR
+    SUBTITLE_COLOR = ColorScheme.SUBTITLE_COLOR
+    LIGHT_TEXT_COLOR = ColorScheme.LIGHT_TEXT_COLOR
+    HIGHLIGHT_COLOR = ColorScheme.HIGHLIGHT_COLOR
+    GRADIENT_1_START = ColorScheme.GRADIENT_1_START
+    GRADIENT_1_END = ColorScheme.GRADIENT_1_END
+    GRADIENT_2_START = ColorScheme.GRADIENT_2_START
+    GRADIENT_2_END = ColorScheme.GRADIENT_2_END
+    GRADIENT_3_START = ColorScheme.GRADIENT_3_START
+    GRADIENT_3_END = ColorScheme.GRADIENT_3_END
 
-    # 卡片配色 - 白色半透明
-    CARD_BG = (255, 255, 255, 250)    # 白色半透明卡片背景
-    CARD_BG_LIGHT = (250, 250, 255, 245) # 稍紫的卡片背景
-
-    # 彩色边框和装饰
-    BORDER_CYAN = (100, 200, 255)     # 柔和青色
-    BORDER_MAGENTA = (255, 100, 200)  # 柔和品红
-    BORDER_YELLOW = (255, 200, 80)    # 柔和金色
-    BORDER_GREEN = (120, 220, 150)    # 柔和绿色
-    BORDER_PINK = (255, 150, 180)     # 柔和粉色
-    BORDER_ORANGE = (255, 160, 100)   # 柔和橙色
-    BORDER_PURPLE = (180, 120, 255)   # 柔和紫色
-    BORDER_BLUE = (120, 180, 255)     # 柔和蓝色
-
-    # 文字颜色
-    TITLE_COLOR = (80, 60, 120)       # 深紫色标题
-    TEXT_COLOR = (60, 60, 80)         # 深灰蓝文字
-    SUBTITLE_COLOR = (100, 100, 130)  # 中灰文字
-    LIGHT_TEXT_COLOR = (130, 130, 150) # 浅灰文字
-    HIGHLIGHT_COLOR = (255, 100, 150)  # 高亮粉色
-
-    # 渐变强调色 - 柔和版本
-    GRADIENT_1_START = (100, 200, 255)         # 柔和青色
-    GRADIENT_1_END = (150, 100, 255)           # 柔和蓝紫色
-
-    GRADIENT_2_START = (255, 120, 200)         # 柔和品红
-    GRADIENT_2_END = (255, 150, 180)           # 柔和粉色
-
-    GRADIENT_3_START = (255, 200, 80)          # 柔和金色
-    GRADIENT_3_END = (255, 160, 100)           # 柔和橙色
-
-    # 尺寸配置
-    WIDTH = 1200
-    PADDING = 70
-    CARD_PADDING = 45
-    CARD_SPACING = 35
-
-    # 字体大小
-    TITLE_SIZE = 64
-    SECTION_TITLE_SIZE = 46
-    SUBTITLE_SIZE = 32
-    TEXT_SIZE = 28
-    SMALL_SIZE = 24
+    WIDTH = LayoutConfig.WIDTH
+    PADDING = LayoutConfig.PADDING
+    CARD_PADDING = LayoutConfig.CARD_PADDING
+    CARD_SPACING = LayoutConfig.CARD_SPACING
+    TITLE_SIZE = LayoutConfig.TITLE_SIZE
+    SECTION_TITLE_SIZE = LayoutConfig.SECTION_TITLE_SIZE
+    SUBTITLE_SIZE = LayoutConfig.SUBTITLE_SIZE
+    TEXT_SIZE = LayoutConfig.TEXT_SIZE
+    SMALL_SIZE = LayoutConfig.SMALL_SIZE
 
     @staticmethod
     def _get_font(size: int) -> ImageFont.FreeTypeFont:
         """获取字体"""
-        font_paths = [
-            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-            "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
-            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/System/Library/Fonts/PingFang.ttc",
-            "C:/Windows/Fonts/msyh.ttc",
-        ]
-
-        for path in font_paths:
+        for path in FontConfig.FONT_PATHS:
             if os.path.exists(path):
                 try:
                     return ImageFont.truetype(path, size)
@@ -189,16 +168,20 @@ class SummaryImageGenerator:
         coords: tuple,
         border_color: tuple,
         radius: int = 20,
-        shadow_strength: int = 15
+        shadow_strength: int = 15,
+        use_gradient_bg: bool = True,
+        use_rainbow_border: bool = True
     ) -> Image.Image:
-        """绘制彩色卡片（适合明亮背景）
+        """绘制彩色卡片（适合明亮背景）- 升级版：渐变背景 + 彩虹边框
 
         Args:
             img: 目标图片
             coords: 卡片坐标 (x1, y1, x2, y2)
-            border_color: 边框颜色
+            border_color: 边框颜色（用于确定主色调）
             radius: 圆角半径
             shadow_strength: 阴影强度
+            use_gradient_bg: 是否使用渐变背景
+            use_rainbow_border: 是否使用彩虹渐变边框
         """
         x1, y1, x2, y2 = coords
 
@@ -228,30 +211,146 @@ class SummaryImageGenerator:
         img = img.convert('RGBA')
         img = Image.alpha_composite(img, overlay)
 
-        # 绘制卡片背景
-        overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
-        overlay_draw = ImageDraw.Draw(overlay)
-        SummaryImageGenerator._draw_rounded_rectangle(
-            overlay_draw,
-            coords,
-            radius,
-            fill=SummaryImageGenerator.CARD_BG
-        )
-        img = Image.alpha_composite(img, overlay)
+        # 绘制卡片背景 - 微妙渐变效果
+        if use_gradient_bg:
+            # 创建渐变背景（从顶部到底部：淡蓝紫 -> 纯白 -> 淡粉）
+            bg_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
+            card_height = y2 - y1
 
-        # 绘制彩色边框
-        overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
-        overlay_draw = ImageDraw.Draw(overlay)
-        border_rgba = border_color + (255,)
-        SummaryImageGenerator._draw_rounded_rectangle(
-            overlay_draw,
-            coords,
-            radius,
-            fill=(0, 0, 0, 0),
-            outline=border_rgba,
-            width=4
-        )
-        img = Image.alpha_composite(img, overlay)
+            for i in range(card_height):
+                ratio = i / card_height
+                # 三段渐变
+                if ratio < 0.3:
+                    # 顶部：淡蓝紫
+                    progress = ratio / 0.3
+                    r = int(252 + (255 - 252) * progress)
+                    g = int(250 + (255 - 250) * progress)
+                    b = int(255)
+                    alpha = 250
+                elif ratio < 0.7:
+                    # 中部：纯白
+                    r, g, b = 255, 255, 255
+                    alpha = 250
+                else:
+                    # 底部：淡粉
+                    progress = (ratio - 0.7) / 0.3
+                    r = int(255)
+                    g = int(255 - 3 * progress)
+                    b = int(255 - 2 * progress)
+                    alpha = 250
+
+                # 只在卡片区域内绘制
+                overlay_line = Image.new('RGBA', img.size, (0, 0, 0, 0))
+                overlay_line_draw = ImageDraw.Draw(overlay_line)
+                overlay_line_draw.line([(x1, y1 + i), (x2, y1 + i)], fill=(r, g, b, alpha))
+                bg_layer = Image.alpha_composite(bg_layer, overlay_line)
+
+            # 应用圆角蒙版
+            mask = Image.new('L', img.size, 0)
+            mask_draw = ImageDraw.Draw(mask)
+            SummaryImageGenerator._draw_rounded_rectangle(
+                mask_draw,
+                coords,
+                radius,
+                fill=255
+            )
+            bg_layer.putalpha(mask)
+            img = Image.alpha_composite(img, bg_layer)
+        else:
+            # 使用纯色背景
+            overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+            overlay_draw = ImageDraw.Draw(overlay)
+            SummaryImageGenerator._draw_rounded_rectangle(
+                overlay_draw,
+                coords,
+                radius,
+                fill=SummaryImageGenerator.CARD_BG
+            )
+            img = Image.alpha_composite(img, overlay)
+
+        # 绘制边框 - 彩虹渐变或单色
+        if use_rainbow_border:
+            # 彩虹渐变边框（沿着轮廓变化颜色）
+            border_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
+            border_draw = ImageDraw.Draw(border_layer)
+
+            # 定义彩虹色序列（基于主色调变化）
+            rainbow_colors = [
+                border_color,  # 主色
+                tuple(min(255, c + 40) for c in border_color),  # 亮一点
+                (border_color[2], border_color[0], border_color[1]),  # 色相旋转
+                (border_color[1], border_color[2], border_color[0]),  # 色相旋转
+                border_color,  # 回到主色
+            ]
+
+            # 绘制多层渐变边框
+            border_width = 4
+            for layer in range(border_width):
+                alpha = 255 - layer * 30
+                perimeter = 2 * (x2 - x1 + y2 - y1)
+                step = perimeter // 100  # 分100段
+
+                for i in range(100):
+                    # 计算当前位置
+                    color_idx = (i * len(rainbow_colors)) // 100
+                    next_color_idx = (color_idx + 1) % len(rainbow_colors)
+                    local_ratio = ((i * len(rainbow_colors)) % 100) / 100
+
+                    # 颜色插值
+                    r = int(rainbow_colors[color_idx][0] + (rainbow_colors[next_color_idx][0] - rainbow_colors[color_idx][0]) * local_ratio)
+                    g = int(rainbow_colors[color_idx][1] + (rainbow_colors[next_color_idx][1] - rainbow_colors[color_idx][1]) * local_ratio)
+                    b = int(rainbow_colors[color_idx][2] + (rainbow_colors[next_color_idx][2] - rainbow_colors[color_idx][2]) * local_ratio)
+
+                    color = (r, g, b, alpha)
+
+                    # 计算边框上的坐标（沿着矩形轮廓）
+                    if i * step < (x2 - x1):  # 顶边
+                        px = x1 + i * step
+                        py = y1 + layer
+                    elif i * step < (x2 - x1 + y2 - y1):  # 右边
+                        px = x2 - layer
+                        py = y1 + (i * step - (x2 - x1))
+                    elif i * step < (2 * (x2 - x1) + y2 - y1):  # 底边
+                        px = x2 - (i * step - (x2 - x1 + y2 - y1))
+                        py = y2 - layer
+                    else:  # 左边
+                        px = x1 + layer
+                        py = y2 - (i * step - (2 * (x2 - x1) + y2 - y1))
+
+                    border_draw.point((px, py), fill=color)
+
+            # 应用圆角蒙版
+            mask = Image.new('L', img.size, 0)
+            mask_draw = ImageDraw.Draw(mask)
+            # 边框区域蒙版（外圆角 - 内圆角）
+            SummaryImageGenerator._draw_rounded_rectangle(
+                mask_draw,
+                (x1 - 2, y1 - 2, x2 + 2, y2 + 2),
+                radius + 2,
+                fill=255
+            )
+            SummaryImageGenerator._draw_rounded_rectangle(
+                mask_draw,
+                (x1 + 4, y1 + 4, x2 - 4, y2 - 4),
+                radius - 4,
+                fill=0
+            )
+            border_layer.putalpha(mask)
+            img = Image.alpha_composite(img, border_layer)
+        else:
+            # 单色边框
+            overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+            overlay_draw = ImageDraw.Draw(overlay)
+            border_rgba = border_color + (255,)
+            SummaryImageGenerator._draw_rounded_rectangle(
+                overlay_draw,
+                coords,
+                radius,
+                fill=(0, 0, 0, 0),
+                outline=border_rgba,
+                width=4
+            )
+            img = Image.alpha_composite(img, overlay)
 
         return img
 
@@ -440,6 +539,283 @@ class SummaryImageGenerator:
         return img
 
     @staticmethod
+    def _draw_decorative_divider(
+        img: Image.Image,
+        y_position: int,
+        width: int,
+        padding: int = 60
+    ) -> Image.Image:
+        """绘制装饰性分隔线 - 带渐变和装饰点
+
+        Args:
+            img: 目标图片
+            y_position: 分隔线Y坐标
+            width: 图片宽度
+            padding: 左右边距
+        """
+        divider_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
+        divider_draw = ImageDraw.Draw(divider_layer)
+
+        x1 = padding
+        x2 = width - padding
+        center_x = width // 2
+
+        # 绘制渐变线条（从两端向中间：透明 -> 彩色 -> 透明）
+        for i in range(x2 - x1):
+            ratio = i / (x2 - x1)
+            # 计算透明度（中间高，两端低）
+            alpha = int(180 * (1 - abs(2 * ratio - 1)))
+
+            # 彩色渐变（彩虹色）
+            hue = (ratio * 360) % 360
+            if hue < 60:
+                r, g, b = 255, int(hue * 4.25), 180
+            elif hue < 120:
+                r, g, b = int(255 - (hue - 60) * 4.25), 255, 200
+            elif hue < 180:
+                r, g, b = 150, 255, int(200 + (hue - 120) * 0.9)
+            elif hue < 240:
+                r, g, b = 180, int(255 - (hue - 180) * 2), 255
+            elif hue < 300:
+                r, g, b = int(200 + (hue - 240) * 0.9), 150, 255
+            else:
+                r, g, b = 255, 160, int(255 - (hue - 300) * 1.25)
+
+            divider_draw.line(
+                [(x1 + i, y_position), (x1 + i + 1, y_position)],
+                fill=(r, g, b, alpha),
+                width=2
+            )
+
+        # 添加中心装饰点
+        dot_colors = [
+            (255, 200, 220, 200),  # 粉
+            (200, 220, 255, 200),  # 蓝
+            (220, 200, 255, 200),  # 紫
+        ]
+        dot_positions = [center_x - 20, center_x, center_x + 20]
+        for i, pos in enumerate(dot_positions):
+            color = dot_colors[i % len(dot_colors)]
+            # 外圈光晕
+            for r in range(8, 0, -1):
+                alpha = int(color[3] * (8 - r) / 8 * 0.3)
+                divider_draw.ellipse(
+                    [pos - r, y_position - r, pos + r, y_position + r],
+                    fill=color[:3] + (alpha,)
+                )
+            # 实心点
+            divider_draw.ellipse(
+                [pos - 4, y_position - 4, pos + 4, y_position + 4],
+                fill=color
+            )
+
+        img = img.convert('RGBA')
+        img = Image.alpha_composite(img, divider_layer)
+        return img
+
+    @staticmethod
+    def _add_corner_decorations(
+        img: Image.Image,
+        card_rect: tuple,
+        corner_path: str,
+        color: tuple = None
+    ) -> Image.Image:
+        """在卡片四角添加装饰
+
+        Args:
+            img: 目标图片
+            card_rect: 卡片矩形 (x1, y1, x2, y2)
+            corner_path: 角落装饰图片路径
+            color: 装饰颜色（可选）
+        """
+        if not os.path.exists(corner_path):
+            return img
+
+        try:
+            corner_img = Image.open(corner_path).convert("RGBA")
+            # 缩放到合适大小
+            size = 25
+            corner_img = corner_img.resize((size, size), Image.Resampling.LANCZOS)
+
+            x1, y1, x2, y2 = card_rect
+            overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+
+            # 左上角
+            overlay.paste(corner_img, (x1 + 10, y1 + 10), corner_img)
+
+            # 右上角（水平翻转）
+            corner_flip_h = corner_img.transpose(Image.FLIP_LEFT_RIGHT)
+            overlay.paste(corner_flip_h, (x2 - size - 10, y1 + 10), corner_flip_h)
+
+            # 左下角（垂直翻转）
+            corner_flip_v = corner_img.transpose(Image.FLIP_TOP_BOTTOM)
+            overlay.paste(corner_flip_v, (x1 + 10, y2 - size - 10), corner_flip_v)
+
+            # 右下角（水平+垂直翻转）
+            corner_flip_both = corner_img.transpose(Image.FLIP_LEFT_RIGHT).transpose(Image.FLIP_TOP_BOTTOM)
+            overlay.paste(corner_flip_both, (x2 - size - 10, y2 - size - 10), corner_flip_both)
+
+            img = Image.alpha_composite(img, overlay)
+            return img
+
+        except Exception as e:
+            logger.error(f"添加角落装饰失败: {e}")
+            return img
+
+    # 已删除未使用的方法: _add_scattered_background_decorations
+    # 已删除未使用的方法: _draw_stat_badge
+
+    @staticmethod
+    def _draw_hourly_chart(
+        img: Image.Image,
+        coords: tuple,
+        hourly_data: dict,
+        font: ImageFont.FreeTypeFont
+    ) -> Image.Image:
+        """绘制24小时发言分布柱状图（带数值标签的圆角柱子）
+
+        Args:
+            img: 目标图片
+            coords: 图表区域坐标 (x1, y1, x2, y2)
+            hourly_data: 24小时发言数据 {hour: count}
+            font: 字体
+
+        Returns:
+            绘制后的图片
+        """
+        x1, y1, x2, y2 = coords
+        chart_width = x2 - x1
+        chart_height = y2 - y1
+
+        # 创建图层
+        chart_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
+        chart_draw = ImageDraw.Draw(chart_layer)
+
+        # 计算柱状图参数
+        bar_count = 24
+        bar_spacing = 10  # 增加间距从8到10
+        total_spacing = bar_spacing * (bar_count - 1)
+        bar_width = (chart_width - total_spacing) // bar_count
+
+        # 获取最大值用于缩放
+        max_count = max(hourly_data.values()) if hourly_data else 1
+        if max_count == 0:
+            max_count = 1
+
+        # 绘制区域高度（留出顶部空间给数值标签，底部空间给时间标签）
+        label_height = 35
+        value_label_space = 40  # 顶部预留空间显示数值
+        available_height = chart_height - label_height - value_label_space - 20
+
+        # 绘制每个柱子
+        for hour in range(24):
+            count = hourly_data.get(hour, 0)
+
+            # 计算柱子高度（至少显示3像素，便于看到圆角）
+            bar_height = max(3, int(available_height * count / max_count)) if max_count > 0 else 3
+
+            # 计算柱子位置
+            bar_x = x1 + hour * (bar_width + bar_spacing)
+            bar_y = y1 + value_label_space + available_height - bar_height
+
+            # 渐变色彩 - 根据时间段选择颜色
+            if 0 <= hour < 6:  # 深夜 - 深蓝紫
+                color_start = (120, 100, 200)
+                color_end = (80, 60, 160)
+            elif 6 <= hour < 12:  # 早晨 - 橙黄
+                color_start = (255, 200, 100)
+                color_end = (255, 160, 80)
+            elif 12 <= hour < 18:  # 下午 - 青蓝
+                color_start = (100, 200, 255)
+                color_end = (80, 160, 220)
+            else:  # 晚上 - 粉紫
+                color_start = (255, 150, 200)
+                color_end = (220, 100, 180)
+
+            # 圆角半径
+            corner_radius = min(bar_width // 2, 8)
+
+            # 创建柱子的渐变填充
+            # 先绘制矩形主体
+            for i in range(bar_height):
+                ratio = i / max(1, bar_height)
+                r = int(color_start[0] + (color_end[0] - color_start[0]) * ratio)
+                g = int(color_start[1] + (color_end[1] - color_start[1]) * ratio)
+                b = int(color_start[2] + (color_end[2] - color_start[2]) * ratio)
+
+                line_y = bar_y + bar_height - i - 1
+
+                # 如果在顶部圆角区域，使用圆角绘制
+                if i < corner_radius:
+                    # 计算圆角裁剪
+                    for px in range(bar_width):
+                        # 检查是否在圆角范围内
+                        left_corner_dist = ((px - corner_radius) ** 2 + (i - corner_radius) ** 2) ** 0.5
+                        right_corner_dist = ((px - (bar_width - corner_radius)) ** 2 + (i - corner_radius) ** 2) ** 0.5
+
+                        if px < corner_radius:  # 左上角
+                            if left_corner_dist <= corner_radius:
+                                chart_draw.point((bar_x + px, line_y), fill=(r, g, b, 240))
+                        elif px >= bar_width - corner_radius:  # 右上角
+                            if right_corner_dist <= corner_radius:
+                                chart_draw.point((bar_x + px, line_y), fill=(r, g, b, 240))
+                        else:  # 中间部分
+                            chart_draw.point((bar_x + px, line_y), fill=(r, g, b, 240))
+                else:
+                    # 非圆角部分，直接绘制线条
+                    chart_draw.line(
+                        [(bar_x, line_y), (bar_x + bar_width, line_y)],
+                        fill=(r, g, b, 240)
+                    )
+
+            # 在柱子顶部显示消息数量（只显示大于0的）
+            if count > 0:
+                count_text = str(count)
+                count_bbox = font.getbbox(count_text)
+                count_w = count_bbox[2] - count_bbox[0]
+                count_h = count_bbox[3] - count_bbox[1]
+
+                # 数值标签位置（柱子正上方）
+                count_x = bar_x + (bar_width - count_w) // 2
+                count_y = bar_y - count_h - 8
+
+                # 绘制数字阴影（增强可读性）
+                chart_draw.text(
+                    (count_x + 1, count_y + 1),
+                    count_text,
+                    fill=(0, 0, 0, 200),
+                    font=font
+                )
+
+                # 绘制数字（使用渐变色系中的明亮色）
+                chart_draw.text(
+                    (count_x, count_y),
+                    count_text,
+                    fill=(100, 200, 255, 255),  # 青色，与图表配色一致
+                    font=font
+                )
+
+            # 绘制时间标签（每4小时显示一次）
+            if hour % 4 == 0:
+                label_text = f"{hour:02d}"
+                label_bbox = font.getbbox(label_text)
+                label_w = label_bbox[2] - label_bbox[0]
+                label_x = bar_x + (bar_width - label_w) // 2
+                label_y = y1 + value_label_space + available_height + 10
+
+                chart_draw.text(
+                    (label_x, label_y),
+                    label_text,
+                    fill=SummaryImageGenerator.LIGHT_TEXT_COLOR + (255,),
+                    font=font
+                )
+
+        # 合并图层
+        img = Image.alpha_composite(img, chart_layer)
+
+        return img
+
+    @staticmethod
     def generate_summary_image(
         title: str,
         summary_text: str,
@@ -447,9 +823,9 @@ class SummaryImageGenerator:
         message_count: int = 0,
         participant_count: int = 0,
         width: int = None,
-        decoration_image_path: str = None,
         user_titles: list = None,
-        golden_quotes: list = None
+        golden_quotes: list = None,
+        hourly_distribution: dict = None
     ) -> str:
         """生成聊天总结图片 - 霓虹赛博朋克风格
 
@@ -460,9 +836,9 @@ class SummaryImageGenerator:
             message_count: 消息数量
             participant_count: 参与人数
             width: 图片宽度
-            decoration_image_path: 装饰图片路径（暂不使用）
             user_titles: 群友称号列表
             golden_quotes: 金句列表
+            hourly_distribution: 24小时发言分布数据 {hour: count}
 
         Returns:
             str: 临时图片文件的绝对路径
@@ -475,6 +851,8 @@ class SummaryImageGenerator:
             user_titles = []
         if golden_quotes is None:
             golden_quotes = []
+        if hourly_distribution is None:
+            hourly_distribution = {}
 
         # 加载字体
         font_title = SummaryImageGenerator._get_font(SummaryImageGenerator.TITLE_SIZE)
@@ -483,46 +861,60 @@ class SummaryImageGenerator:
         font_text = SummaryImageGenerator._get_font(SummaryImageGenerator.TEXT_SIZE)
         font_small = SummaryImageGenerator._get_font(SummaryImageGenerator.SMALL_SIZE)
 
-        plugin_dir = os.path.dirname(__file__)
+        # 获取插件根目录（core的父目录）
+        plugin_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
         # ===== 计算所需高度 =====
         header_height = 300
+        hourly_chart_height = 0
         summary_card_height = 0
         titles_section_height = 0
         quotes_section_height = 0
 
-        # 计算总结卡片高度
+        # 计算24小时分布图表高度
+        if hourly_distribution and any(hourly_distribution.values()):
+            hourly_chart_height = 440  # 分隔线40 + 标题区100 + 图表250 + 间距50
+
+        # 计算总结卡片高度（优化行间距从15到18）
         max_text_width = width - SummaryImageGenerator.PADDING * 2 - SummaryImageGenerator.CARD_PADDING * 2
         wrapped_lines = SummaryImageGenerator._wrap_text(summary_text, max_text_width, font_text)
         line_height = font_text.getbbox('测试')[3] - font_text.getbbox('测试')[1]
-        summary_card_height = SummaryImageGenerator.CARD_PADDING * 2 + len(wrapped_lines) * (line_height + 15) + 80
+        # 总结卡片区域 = 分隔线40 + 卡片本身 + 间距50
+        card_content_height = SummaryImageGenerator.CARD_PADDING * 2 + len(wrapped_lines) * (line_height + 18) + 80
+        summary_card_height = 40 + card_content_height + 50
 
         # 计算称号区域高度
         if user_titles:
-            titles_section_height = 150  # 标题高度
-            max_reason_width = width - SummaryImageGenerator.PADDING * 2 - SummaryImageGenerator.CARD_PADDING * 2 - 200 - 50
+            titles_section_height = 190  # 分隔线40 + 标题区150
+            max_reason_width = width - SummaryImageGenerator.PADDING * 2 - SummaryImageGenerator.CARD_PADDING * 2
+            reason_line_height = font_small.getbbox('测试')[3] - font_small.getbbox('测试')[1]
+            title_line_height = font_subtitle.getbbox('测试')[3] - font_subtitle.getbbox('测试')[1]
             for title_item in user_titles[:4]:  # 显示4个
                 reason = title_item.get("reason", "")
                 reason_lines = SummaryImageGenerator._wrap_text(reason, max_reason_width, font_small)
-                card_height = 60 + 50 + len(reason_lines) * (28 + 8) + 30
+                card_height = 50 + title_line_height + 25 + len(reason_lines) * (reason_line_height + 8) + 30
+                card_height = max(card_height, 120)
                 titles_section_height += card_height + SummaryImageGenerator.CARD_SPACING
+            titles_section_height += 30  # 区域底部间距
 
         # 计算金句区域高度
         if golden_quotes:
-            quotes_section_height = 150  # 标题高度
+            quotes_section_height = 190  # 分隔线40 + 标题区150
             max_quote_width = width - SummaryImageGenerator.PADDING * 2 - SummaryImageGenerator.CARD_PADDING * 2
+            reason_line_height = font_small.getbbox('测试')[3] - font_small.getbbox('测试')[1]
             for quote_item in golden_quotes[:4]:  # 显示4个
                 content = quote_item.get("content", "")
                 reason = quote_item.get("reason", "")
                 quote_text = f'"{content}"'
                 quote_lines = SummaryImageGenerator._wrap_text(quote_text, max_quote_width, font_text)
                 reason_lines = SummaryImageGenerator._wrap_text(reason, max_quote_width, font_small)
-                card_height = 50 + len(quote_lines) * (line_height + 12) + 50 + len(reason_lines) * 32 + 40
+                card_height = 50 + len(quote_lines) * (line_height + 12) + 50 + len(reason_lines) * (reason_line_height + 8) + 40
+                card_height = max(card_height, 200)
                 quotes_section_height += card_height + SummaryImageGenerator.CARD_SPACING
 
         # 总高度（增加底部空间以显示decoration2）
         footer_height = 280
-        total_height = header_height + summary_card_height + titles_section_height + quotes_section_height + footer_height
+        total_height = header_height + hourly_chart_height + summary_card_height + titles_section_height + quotes_section_height + footer_height
 
         # ===== 创建图片 =====
         img = Image.new('RGB', (width, total_height), SummaryImageGenerator.BG_START)
@@ -545,13 +937,13 @@ class SummaryImageGenerator:
         # 转换为RGBA
         img = img.convert('RGBA')
 
-        # 添加背景装饰 - 波点图案
+        # 增强背景装饰 - 波点 + 流动光线 + 星星粒子
         import random
         random.seed(42)  # 固定种子保证每次生成相同图案
         bg_overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
         bg_draw = ImageDraw.Draw(bg_overlay)
 
-        # 绘制柔和波点
+        # 1. 绘制柔和波点
         for _ in range(80):
             x = random.randint(0, width)
             y = random.randint(0, total_height)
@@ -565,7 +957,82 @@ class SummaryImageGenerator:
             color = random.choice(colors)
             bg_draw.ellipse([x, y, x + size, y + size], fill=color)
 
+        # 2. 添加流动光线（斜向光束）
+        for i in range(5):
+            start_x = random.randint(-200, width)
+            start_y = i * (total_height // 5)
+            line_length = random.randint(400, 800)
+
+            # 绘制渐变光束
+            for step in range(line_length):
+                ratio = step / line_length
+                # 光束透明度（中间亮，两端暗）
+                alpha = int(50 * (1 - abs(2 * ratio - 1)))
+
+                # 光束颜色（随机选择）
+                beam_colors = [
+                    (200, 220, 255),  # 蓝色
+                    (255, 200, 220),  # 粉色
+                    (220, 200, 255),  # 紫色
+                ]
+                beam_color = beam_colors[i % len(beam_colors)]
+
+                x = start_x + step
+                y = start_y + step * 0.3  # 斜向
+
+                if 0 <= x < width and 0 <= y < total_height:
+                    # 绘制光束点（带渐变宽度）
+                    beam_width = int(3 * (1 - abs(2 * ratio - 1)))
+                    for w in range(-beam_width, beam_width + 1):
+                        draw_y = int(y + w)
+                        if 0 <= draw_y < total_height:
+                            pixel_alpha = int(alpha * (1 - abs(w) / max(1, beam_width)))
+                            bg_draw.point((int(x), draw_y), fill=beam_color + (pixel_alpha,))
+
+        # 3. 添加闪烁星星粒子
+        for _ in range(120):
+            star_x = random.randint(0, width)
+            star_y = random.randint(0, total_height)
+            star_size = random.choice([1, 2, 3])  # 不同大小的星星
+
+            # 星星颜色（柔和亮色）
+            star_colors = [
+                (255, 255, 220, 180),  # 金色
+                (220, 240, 255, 180),  # 浅蓝
+                (255, 230, 240, 180),  # 粉白
+                (240, 230, 255, 180),  # 淡紫
+            ]
+            star_color = random.choice(star_colors)
+
+            if star_size == 1:
+                # 小星星：单点
+                bg_draw.point((star_x, star_y), fill=star_color)
+            elif star_size == 2:
+                # 中星星：十字形
+                for dx, dy in [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    nx, ny = star_x + dx, star_y + dy
+                    if 0 <= nx < width and 0 <= ny < total_height:
+                        alpha = star_color[3] if dx == 0 and dy == 0 else star_color[3] // 2
+                        bg_draw.point((nx, ny), fill=star_color[:3] + (alpha,))
+            else:
+                # 大星星：带光晕的十字
+                for r in range(3, 0, -1):
+                    alpha = int(star_color[3] * (3 - r) / 3 * 0.6)
+                    for dx, dy in [(0, r), (0, -r), (r, 0), (-r, 0)]:
+                        nx, ny = star_x + dx, star_y + dy
+                        if 0 <= nx < width and 0 <= ny < total_height:
+                            bg_draw.point((nx, ny), fill=star_color[:3] + (alpha,))
+                # 中心点
+                bg_draw.point((star_x, star_y), fill=star_color)
+
         img = Image.alpha_composite(img, bg_overlay)
+
+        # 已删除：散落的装饰图标到背景
+        # img = SummaryImageGenerator._add_scattered_background_decorations(
+        #     img,
+        #     plugin_dir,
+        #     seed=42  # 使用固定种子保证每次生成位置一致
+        # )
 
         y = 0
 
@@ -652,35 +1119,142 @@ class SummaryImageGenerator:
                 SummaryImageGenerator.BORDER_YELLOW
             )
 
-        # 绘制时间和统计信息
-        if time_info or message_count > 0:
-            info_parts = []
-            if time_info:
-                info_parts.append(time_info)
-            if message_count > 0:
-                msg_text = f"{message_count}条消息"
-                if participant_count > 0:
-                    msg_text += f" · {participant_count}人参与"
-                info_parts.append(msg_text)
+        # 绘制时间和统计信息 - 单个统一徽章
+        badge_y = 200
 
-            info_text = " | ".join(info_parts)
-            info_bbox = font_small.getbbox(info_text)
-            info_width = info_bbox[2] - info_bbox[0]
-            info_x = (width - info_width) // 2
+        # 构建统计信息文本
+        stats_parts = []
+        if time_info:
+            stats_parts.append(time_info)
+        if message_count > 0:
+            stats_parts.append(f"{message_count}条消息")
+        if participant_count > 0:
+            stats_parts.append(f"{participant_count}人参与")
 
-            text_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
-            text_draw = ImageDraw.Draw(text_layer)
-            SummaryImageGenerator._draw_text_with_shadow(
-                text_draw,
-                (info_x, 180),
-                info_text,
-                font_small,
-                SummaryImageGenerator.HIGHLIGHT_COLOR,
-                shadow_offset=2
+        if stats_parts:
+            stats_text = " 丨 ".join(stats_parts)
+
+            # 计算徽章尺寸
+            stats_bbox = font_small.getbbox(stats_text)
+            stats_w = stats_bbox[2] - stats_bbox[0]
+            stats_h = stats_bbox[3] - stats_bbox[1]
+
+            badge_w = stats_w + 60
+            badge_h = stats_h + 20
+            badge_radius = badge_h // 2
+            badge_x = (width - badge_w) // 2
+
+            # 创建独立的徽章图层
+            badge_img = Image.new('RGBA', (badge_w, badge_h), (0, 0, 0, 0))
+            badge_draw = ImageDraw.Draw(badge_img)
+
+            # 绘制徽章背景（渐变）
+            for i in range(badge_w):
+                ratio = i / badge_w
+                r = int(SummaryImageGenerator.GRADIENT_1_START[0] + (SummaryImageGenerator.GRADIENT_2_END[0] - SummaryImageGenerator.GRADIENT_1_START[0]) * ratio)
+                g = int(SummaryImageGenerator.GRADIENT_1_START[1] + (SummaryImageGenerator.GRADIENT_2_END[1] - SummaryImageGenerator.GRADIENT_1_START[1]) * ratio)
+                b = int(SummaryImageGenerator.GRADIENT_1_START[2] + (SummaryImageGenerator.GRADIENT_2_END[2] - SummaryImageGenerator.GRADIENT_1_START[2]) * ratio)
+                badge_draw.line(
+                    [(i, 0), (i, badge_h)],
+                    fill=(r, g, b, 230)
+                )
+
+            # 应用圆角蒙版
+            mask = Image.new('L', (badge_w, badge_h), 0)
+            mask_draw = ImageDraw.Draw(mask)
+            SummaryImageGenerator._draw_rounded_rectangle(
+                mask_draw,
+                (0, 0, badge_w, badge_h),
+                badge_radius,
+                fill=255
             )
-            img = Image.alpha_composite(img, text_layer)
+            badge_img.putalpha(mask)
+
+            # 绘制文本到徽章
+            text_draw = ImageDraw.Draw(badge_img)
+            text_x = (badge_w - stats_w) // 2
+            text_y = (badge_h - stats_h) // 2
+
+            # 绘制文本（深色字体，更清晰）
+            text_draw.text(
+                (text_x, text_y),
+                stats_text,
+                font=font_small,
+                fill=(60, 60, 80, 255)  # 使用深色字体
+            )
+
+            # 将徽章合成到主图
+            overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+            overlay.paste(badge_img, (badge_x, badge_y), badge_img)
+            img = Image.alpha_composite(img, overlay)
 
         y = header_height
+
+        # ===== 24小时发言分布图表 =====
+        if hourly_distribution and any(hourly_distribution.values()):
+            # 添加装饰性分隔线
+            img = SummaryImageGenerator._draw_decorative_divider(img, y + 10, width)
+            y += 40
+
+            # 标题
+            section_title = "24小时发言分布"
+            title_bbox = font_section_title.getbbox(section_title)
+            section_title_width = title_bbox[2] - title_bbox[0]
+            section_title_x = (width - section_title_width) // 2
+
+            # 彩色描边标题
+            img = SummaryImageGenerator._draw_colorful_text(
+                img,
+                (section_title_x, y + 20),
+                section_title,
+                font_section_title,
+                SummaryImageGenerator.TITLE_COLOR,
+                outline_color=SummaryImageGenerator.BORDER_GREEN,
+                shadow_radius=8
+            )
+
+            y += 100
+
+            # 绘制图表卡片（增加高度以容纳顶部数值标签）
+            card_x = SummaryImageGenerator.PADDING
+            card_width = width - SummaryImageGenerator.PADDING * 2
+            chart_height = 250  # 从200增加到250，为数值标签预留空间
+
+            img = SummaryImageGenerator._draw_colorful_card(
+                img,
+                (card_x, y, card_x + card_width, y + chart_height),
+                SummaryImageGenerator.BORDER_GREEN,
+                radius=25,
+                shadow_strength=15
+            )
+
+            # 添加角落装饰
+            corner_path = os.path.join(plugin_dir, "decorations", "decoration_corner.png")
+            img = SummaryImageGenerator._add_corner_decorations(
+                img,
+                (card_x, y, card_x + card_width, y + chart_height),
+                corner_path,
+                SummaryImageGenerator.BORDER_GREEN
+            )
+
+            # 绘制图表
+            chart_x1 = card_x + SummaryImageGenerator.CARD_PADDING
+            chart_y1 = y + SummaryImageGenerator.CARD_PADDING
+            chart_x2 = card_x + card_width - SummaryImageGenerator.CARD_PADDING
+            chart_y2 = y + chart_height - SummaryImageGenerator.CARD_PADDING
+
+            img = SummaryImageGenerator._draw_hourly_chart(
+                img,
+                (chart_x1, chart_y1, chart_x2, chart_y2),
+                hourly_distribution,
+                font_small
+            )
+
+            y += chart_height + 50
+
+        # 添加装饰性分隔线
+        img = SummaryImageGenerator._draw_decorative_divider(img, y + 10, width)
+        y += 40
 
         # ===== 总结卡片（霓虹卡片） =====
         card_x = SummaryImageGenerator.PADDING
@@ -688,13 +1262,22 @@ class SummaryImageGenerator:
 
         img = SummaryImageGenerator._draw_colorful_card(
             img,
-            (card_x, y, card_x + card_width, y + summary_card_height),
+            (card_x, y, card_x + card_width, y + card_content_height),
             SummaryImageGenerator.BORDER_CYAN,
             radius=25,
             shadow_strength=15
         )
 
-        # 绘制总结文本
+        # 添加角落装饰
+        corner_path = os.path.join(plugin_dir, "decorations", "decoration_corner.png")
+        img = SummaryImageGenerator._add_corner_decorations(
+            img,
+            (card_x, y, card_x + card_width, y + card_content_height),
+            corner_path,
+            SummaryImageGenerator.BORDER_CYAN
+        )
+
+        # 绘制总结文本（优化行间距从15到18）
         text_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
         text_draw = ImageDraw.Draw(text_layer)
         text_y = y + SummaryImageGenerator.CARD_PADDING + 20
@@ -710,7 +1293,7 @@ class SummaryImageGenerator:
                     SummaryImageGenerator.TEXT_COLOR,
                     shadow_offset=2
                 )
-            text_y += line_height + 15
+            text_y += line_height + 18  # 优化行间距从15到18
 
         img = Image.alpha_composite(img, text_layer)
 
@@ -719,8 +1302,8 @@ class SummaryImageGenerator:
         sparkle_positions = [
             (card_x + 15, y + 15),
             (card_x + card_width - 55, y + 15),
-            (card_x + 15, y + summary_card_height - 55),
-            (card_x + card_width - 55, y + summary_card_height - 55),
+            (card_x + 15, y + card_content_height - 55),
+            (card_x + card_width - 55, y + card_content_height - 55),
         ]
         for pos in sparkle_positions:
             img = SummaryImageGenerator._add_decoration_with_glow(
@@ -731,10 +1314,14 @@ class SummaryImageGenerator:
                 SummaryImageGenerator.BORDER_CYAN
             )
 
-        y += summary_card_height + 50
+        y += card_content_height + 50
 
         # ===== 群友称号区域 =====
         if user_titles:
+            # 添加装饰性分隔线
+            img = SummaryImageGenerator._draw_decorative_divider(img, y + 10, width)
+            y += 40
+
             # 标题
             section_title = "群友称号"
             title_bbox = font_section_title.getbbox(section_title)
@@ -827,6 +1414,15 @@ class SummaryImageGenerator:
                     border_color,
                     radius=20,
                     shadow_strength=15
+                )
+
+                # 添加角落装饰
+                corner_path = os.path.join(plugin_dir, "decorations", "decoration_corner.png")
+                img = SummaryImageGenerator._add_corner_decorations(
+                    img,
+                    (card_x, y, card_x + card_width, y + card_height),
+                    corner_path,
+                    border_color
                 )
 
                 # 第一行：装饰图标 + 群称号徽章 + 群友名称
@@ -933,6 +1529,10 @@ class SummaryImageGenerator:
 
         # ===== 金句区域 =====
         if golden_quotes:
+            # 添加装饰性分隔线
+            img = SummaryImageGenerator._draw_decorative_divider(img, y + 10, width)
+            y += 40
+
             # 标题
             section_title = "群圣经"
             title_bbox = font_section_title.getbbox(section_title)
@@ -1031,6 +1631,25 @@ class SummaryImageGenerator:
                     SummaryImageGenerator.BORDER_PINK,
                     radius=25,
                     shadow_strength=15
+                )
+
+                # 添加引号装饰（左侧）
+                quote_deco_path = os.path.join(plugin_dir, "decorations", "decoration_quote.png")
+                img = SummaryImageGenerator._add_decoration_with_glow(
+                    img,
+                    quote_deco_path,
+                    (card_x + 15, y + 15),
+                    (35, 35),
+                    SummaryImageGenerator.BORDER_PINK
+                )
+
+                # 添加角落装饰
+                corner_path = os.path.join(plugin_dir, "decorations", "decoration_corner.png")
+                img = SummaryImageGenerator._add_corner_decorations(
+                    img,
+                    (card_x, y, card_x + card_width, y + card_height),
+                    corner_path,
+                    SummaryImageGenerator.BORDER_PINK
                 )
 
                 # 添加心形装饰
