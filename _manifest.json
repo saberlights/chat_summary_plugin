@@ -13,7 +13,7 @@
 
   "host_application": {
     "name": "MaiBot",
-    "min_version": "0.8.0"
+    "min_version": "0.11.0"
   },
 
   "keywords": ["chat", "summary", "analysis", "ai", "群聊", "总结", "分析", "图片生成", "定时任务"],
