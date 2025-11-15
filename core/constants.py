@@ -90,6 +90,7 @@ class DecorationConfig:
     DECORATION_2: str = "decoration2.png"
     DECORATION_3: str = "decoration3.png"
     DECORATION_4: str = "decoration4.png"
+    DECORATION_5: str = "decoration5.png"
     DECORATION_STAR: str = "decoration_star.png"
     DECORATION_SPARKLE: str = "decoration_sparkle.png"
     DECORATION_HEART: str = "decoration_heart.png"
@@ -111,5 +112,5 @@ class AnalysisConfig:
     MAX_QUOTES: int = 5              # 最多金句数
 
     # JSON 返回验证
-    MAX_REASON_LENGTH: int = 200     # 理由最大长度（防止LLM返回过长）
+    MAX_REASON_LENGTH: int = 100     # 理由最大长度（防止LLM返回过长，控制在70字左右）
     MAX_TITLE_LENGTH: int = 10       # 称号最大长度

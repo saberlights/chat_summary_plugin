@@ -93,6 +93,7 @@ class ChatAnalysisUtils:
 
             if user_id not in user_stats:
                 user_stats[user_id] = {
+                    "user_id": user_id,  # 保存 user_id
                     "nickname": nickname,
                     "message_count": 0,
                     "char_count": 0,
@@ -171,7 +172,7 @@ class ChatAnalysisUtils:
 2. 基于真实数据，不要编造
 3. 避免重复类型（不要多个"龙王""话痨"）
 4. 有创意，避免陈词滥调
-5. 理由60-80字，引用数据说明为什么
+5. 理由严格控制在50-70字，引用数据说明为什么
 
 参考分类：活跃度（龙王、潜水员）、时间特征（夜猫子）、内容风格（段子手）、表情/情绪（表情帝）、互动特征（接梗高手）
 
@@ -180,7 +181,7 @@ class ChatAnalysisUtils:
   {{
     "name": "用户名",
     "title": "称号（2-4字）",
-    "reason": "获得理由，引用数据（60-80字）"
+    "reason": "获得理由,引用数据（50-70字）"
   }}
 ]"""
 
@@ -198,7 +199,7 @@ class ChatAnalysisUtils:
 
             # 解析并验证 JSON
             data = ChatAnalysisUtils._parse_llm_json(result)
-            return ChatAnalysisUtils._validate_titles(data)
+            return ChatAnalysisUtils._validate_titles(data, user_stats)
 
         except Exception as e:
             logger.error(f"分析群友称号失败: {e}", exc_info=True)
@@ -264,7 +265,7 @@ class ChatAnalysisUtils:
 - 每个金句来自不同发言人
 - 避免平淡陈述句、问候语
 - 内容水可以只返回2-3个
-- 理由60-80字，说明为什么有趣、回应了什么
+- 理由严格控制在50-70字，说明为什么有趣、回应了什么
 
 群聊记录：
 {messages_text}
@@ -274,7 +275,7 @@ class ChatAnalysisUtils:
   {{
     "content": "金句原文",
     "sender": "发言人",
-    "reason": "选择理由（60-80字）"
+    "reason": "选择理由（50-70字）"
   }}
 ]"""
 
@@ -299,11 +300,114 @@ class ChatAnalysisUtils:
             return []
 
     @staticmethod
-    def _validate_titles(data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def analyze_depression_index(
+        messages: List[dict],
+        user_stats: Dict,
+        get_config: Callable = None
+    ) -> Optional[List[Dict]]:
+        """使用 LLM 分析群友炫压抑指数
+
+        Args:
+            messages: 聊天记录列表
+            user_stats: 用户统计数据
+            get_config: 配置获取函数（可选）
+
+        Returns:
+            炫压抑指数列表，格式: [{name, user_id, rank, comment}, ...]
+        """
+        try:
+            # 只分析发言 >= 配置的最小发言数的用户
+            active_users = {
+                uid: stats for uid, stats in user_stats.items()
+                if stats["message_count"] >= AnalysisConfig.MIN_MESSAGES_FOR_TITLE
+            }
+
+            if not active_users:
+                return []
+
+            # 提取用户发言内容样本
+            user_messages = {}
+            for msg in messages:
+                user_id = str(msg.get("user_id", ""))
+                if user_id not in active_users:
+                    continue
+
+                text = msg.get("processed_plain_text", "")
+                if len(text) < 5:  # 过滤太短的消息
+                    continue
+
+                if user_id not in user_messages:
+                    user_messages[user_id] = []
+
+                # 每人最多收集20条有效发言
+                if len(user_messages[user_id]) < 20:
+                    user_messages[user_id].append(text)
+
+            if not user_messages:
+                return []
+
+            # 构建用户发言样本文本
+            users_sample = []
+            for user_id in sorted(user_messages.keys(), key=lambda uid: active_users[uid]["message_count"], reverse=True):
+                nickname = active_users[user_id]["nickname"]
+                sample_texts = user_messages[user_id][:10]  # 提供10条样本
+                users_sample.append(
+                    f"【{nickname}】\n" + "\n".join(f"  - {text[:60]}" for text in sample_texts)
+                )
+
+            users_info = "\n\n".join(users_sample)
+
+            # 构建 prompt
+            prompt = f"""分析群友的"炫压抑"指数（娱乐向）。炫压抑=性欲望强烈但表达受抑制的失衡状态。
+
+用户发言样本：
+{users_info}
+
+评级标准：
+- S级：想色色但欲言又止,或疯狂发涩图/开黄腔(过度补偿)
+- A级：经常想开车但克制扭捏
+- B级：偶尔开车,表达自然
+- C级：很少提及或表达健康
+- D级：完全回避性话题
+
+要求：只返回前4名,评价25-30字,采用文言文风格,文雅而有趣。
+
+返回JSON（不要markdown代码块，不要emoji）：
+[
+  {{
+    "name": "用户名",
+    "rank": "S/A/B/C/D",
+    "comment": "简短评价"
+  }}
+]"""
+
+            # 使用 LLM 生成
+            model_task_config = model_config.model_task_config.replyer
+            success, result, reasoning, model_name = await llm_api.generate_with_model(
+                prompt=prompt,
+                model_config=model_task_config,
+                request_type="plugin.chat_summary.depression",
+            )
+
+            if not success:
+                logger.error(f"LLM生成炫压抑指数失败: {result}")
+                return []
+
+            # 解析并验证 JSON
+            data = ChatAnalysisUtils._parse_llm_json(result)
+            return ChatAnalysisUtils._validate_depression_index(data, user_stats)
+
+        except Exception as e:
+            logger.error(f"分析炫压抑指数失败: {e}", exc_info=True)
+            return []
+
+    @staticmethod
+    def _validate_titles(data: List[Dict[str, Any]], user_stats: Dict[str, Dict] = None) -> List[Dict[str, Any]]:
         """验证并清理群友称号数据
 
         Args:
             data: 原始数据列表
+            user_stats: 用户统计数据（用于匹配 user_id）
 
         Returns:
             验证后的数据列表
@@ -326,10 +430,19 @@ class ChatAnalysisUtils:
             if not name or not title or not reason:
                 continue
 
+            # 尝试从 user_stats 中查找匹配的 user_id
+            user_id = ""
+            if user_stats:
+                for uid, stats in user_stats.items():
+                    if stats.get("nickname") == name:
+                        user_id = uid
+                        break
+
             validated.append({
                 "name": name,
                 "title": title,
-                "reason": reason
+                "reason": reason,
+                "user_id": user_id  # 添加 user_id 字段
             })
 
         return validated
@@ -359,6 +472,10 @@ class ChatAnalysisUtils:
             sender = str(item["sender"])[:50]
             reason = str(item["reason"])[:AnalysisConfig.MAX_REASON_LENGTH]
 
+            # 清理 @ 提及格式（如 @理理<123456> → 去掉整个提及部分）
+            content = re.sub(r'@[^<\s]+<\d+>\s*', '', content)
+            content = content.strip()
+
             if not content or not sender or not reason:
                 continue
 
@@ -369,6 +486,57 @@ class ChatAnalysisUtils:
             })
 
         return validated
+
+    @staticmethod
+    def _validate_depression_index(data: List[Dict[str, Any]], user_stats: Dict[str, Dict] = None) -> List[Dict[str, Any]]:
+        """验证并清理炫压抑指数数据
+
+        Args:
+            data: 原始数据列表
+            user_stats: 用户统计数据（用于匹配 user_id）
+
+        Returns:
+            验证后的数据列表
+        """
+        validated = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+
+            # 必需字段
+            if not all(key in item for key in ["name", "rank", "comment"]):
+                logger.warning(f"炫压抑指数数据缺少必需字段: {item}")
+                continue
+
+            # 验证数据类型和长度
+            name = str(item["name"])[:50]
+            rank = str(item["rank"]).upper().strip()
+            comment = str(item["comment"])[:60]  # 限制评价长度（30字约60字符）
+
+            # 验证rank是否在S/A/B/C/D中
+            if rank not in ["S", "A", "B", "C", "D"]:
+                logger.warning(f"无效的rank值: {rank}")
+                continue
+
+            if not name or not rank or not comment:
+                continue
+
+            # 尝试从 user_stats 中查找匹配的 user_id
+            user_id = ""
+            if user_stats:
+                for uid, stats in user_stats.items():
+                    if stats.get("nickname") == name:
+                        user_id = uid
+                        break
+
+            validated.append({
+                "name": name,
+                "rank": rank,
+                "comment": comment,
+                "user_id": user_id
+            })
+
+        return validated[:4]  # 只返回前4个
 
     @staticmethod
     def _parse_llm_json(result: str) -> List[Dict[str, Any]]:
@@ -416,6 +584,7 @@ class ChatAnalysisUtils:
 
         except json.JSONDecodeError as e:
             logger.warning(f"解析 JSON 失败: {e}, 尝试清理emoji和修复格式后重试")
+            logger.debug(f"原始LLM输出（前500字符）: {result[:500]}")
             # 只有解析失败时才尝试清理和修复
             try:
                 # 1. 移除emoji
@@ -437,10 +606,13 @@ class ChatAnalysisUtils:
                 data = json.loads(result_cleaned)
 
                 if not isinstance(data, list):
+                    logger.warning(f"清理后的数据类型错误: {type(data)}")
                     return []
                 if data and not all(isinstance(item, dict) for item in data):
+                    logger.warning("清理后的列表包含非字典元素")
                     return []
 
+                logger.info("成功通过清理和修复解析JSON")
                 return data
             except Exception as e2:
                 logger.error(f"清理emoji和修复格式后仍然失败: {e2}")

@@ -7,6 +7,8 @@ import os
 import io
 import base64
 import tempfile
+import aiohttp
+import asyncio
 from typing import Tuple, List, Optional
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
@@ -72,6 +74,127 @@ class SummaryImageGenerator:
                     continue
 
         raise RuntimeError("未找到可用的中文字体")
+
+    @staticmethod
+    async def _download_qq_avatar(qq_id: str, size: int = 100) -> Optional[Image.Image]:
+        """下载QQ用户头像
+
+        Args:
+            qq_id: QQ号
+            size: 头像尺寸，可选 40, 100, 140, 640
+
+        Returns:
+            PIL Image对象，失败返回 None
+        """
+        if not qq_id:
+            return None
+
+        avatar_url = f"https://q1.qlogo.cn/g?b=qq&nk={qq_id}&s={size}"
+        try:
+            timeout = aiohttp.ClientTimeout(total=5)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(avatar_url) as resp:
+                    if resp.status == 200:
+                        avatar_data = await resp.read()
+                        return Image.open(io.BytesIO(avatar_data)).convert("RGBA")
+        except Exception as e:
+            logger.debug(f"下载头像失败 (QQ:{qq_id}): {e}")
+
+        return None
+
+    @staticmethod
+    def _create_circular_avatar(avatar: Image.Image, size: int) -> Image.Image:
+        """将头像裁剪为圆形
+
+        Args:
+            avatar: 原始头像图片
+            size: 目标尺寸
+
+        Returns:
+            圆形头像
+        """
+        # 调整大小
+        avatar = avatar.resize((size, size), Image.Resampling.LANCZOS)
+
+        # 创建圆形蒙版
+        mask = Image.new('L', (size, size), 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse((0, 0, size, size), fill=255)
+
+        # 应用蒙版
+        output = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+        output.paste(avatar, (0, 0))
+        output.putalpha(mask)
+
+        return output
+
+    @staticmethod
+    def _add_avatar_glow(
+        img: Image.Image,
+        avatar: Image.Image,
+        position: Tuple[int, int],
+        glow_color: Tuple[int, int, int],
+        glow_radius: int = 8
+    ) -> Image.Image:
+        """添加带光晕效果的圆形头像
+
+        Args:
+            img: 目标图片
+            avatar: 圆形头像
+            position: 粘贴位置 (x, y)
+            glow_color: 光晕颜色 RGB
+            glow_radius: 光晕半径
+
+        Returns:
+            添加头像后的图片
+        """
+        size = avatar.size[0]
+
+        # 创建光晕层
+        glow_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
+        for offset in range(glow_radius, 0, -1):
+            alpha = int(50 * (glow_radius - offset) / glow_radius)
+            glow_size = size + offset * 2
+            glow_temp = Image.new('RGBA', (glow_size, glow_size), (0, 0, 0, 0))
+
+            # 创建光晕圆形
+            glow_mask = Image.new('L', (glow_size, glow_size), 0)
+            glow_mask_draw = ImageDraw.Draw(glow_mask)
+            glow_mask_draw.ellipse((0, 0, glow_size, glow_size), fill=255)
+
+            # 应用颜色
+            glow_colored = Image.new('RGBA', (glow_size, glow_size), glow_color + (alpha,))
+            glow_temp.paste(glow_colored, (0, 0), glow_mask)
+
+            # 粘贴到光晕层
+            glow_x = position[0] - offset
+            glow_y = position[1] - offset
+            glow_layer.paste(glow_temp, (glow_x, glow_y), glow_temp)
+
+        # 模糊光晕
+        glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=glow_radius // 2))
+
+        # 合成光晕
+        img = Image.alpha_composite(img, glow_layer)
+
+        # 添加白色边框
+        border_size = size + 6
+        border_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
+        border_draw = ImageDraw.Draw(border_layer)
+        border_x = position[0] - 3
+        border_y = position[1] - 3
+        border_draw.ellipse(
+            (border_x, border_y, border_x + border_size, border_y + border_size),
+            fill=(255, 255, 255, 200)
+        )
+        img = Image.alpha_composite(img, border_layer)
+
+        # 粘贴头像
+        overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+        overlay.paste(avatar, position, avatar)
+        img = Image.alpha_composite(img, overlay)
+
+        return img
 
     @staticmethod
     def _draw_rounded_rectangle(
@@ -816,7 +939,7 @@ class SummaryImageGenerator:
         return img
 
     @staticmethod
-    def generate_summary_image(
+    async def generate_summary_image(
         title: str,
         summary_text: str,
         time_info: str = "",
@@ -825,6 +948,7 @@ class SummaryImageGenerator:
         width: int = None,
         user_titles: list = None,
         golden_quotes: list = None,
+        depression_index: list = None,
         hourly_distribution: dict = None
     ) -> str:
         """生成聊天总结图片 - 霓虹赛博朋克风格
@@ -838,6 +962,7 @@ class SummaryImageGenerator:
             width: 图片宽度
             user_titles: 群友称号列表
             golden_quotes: 金句列表
+            depression_index: 炫压抑指数列表
             hourly_distribution: 24小时发言分布数据 {hour: count}
 
         Returns:
@@ -912,9 +1037,17 @@ class SummaryImageGenerator:
                 card_height = max(card_height, 200)
                 quotes_section_height += card_height + SummaryImageGenerator.CARD_SPACING
 
-        # 总高度（增加底部空间以显示decoration2）
-        footer_height = 280
-        total_height = header_height + hourly_chart_height + summary_card_height + titles_section_height + quotes_section_height + footer_height
+        # 计算炫压抑指数区域高度
+        depression_index_height = 0
+        if depression_index:
+            depression_index_height = 190  # 分隔线40 + 标题区150
+            card_h = 160  # 每个卡片高度（增加以容纳文言文评价）
+            num_rows = (len(depression_index[:4]) + 1) // 2  # 最多4个，2列布局，计算行数
+            depression_index_height += num_rows * (card_h + 25) + 10  # 每行高度+间距
+
+        # 总高度（底部装饰区域）
+        footer_height = 160  # 减少底部空白
+        total_height = header_height + hourly_chart_height + summary_card_height + titles_section_height + quotes_section_height + depression_index_height + footer_height
 
         # ===== 创建图片 =====
         img = Image.new('RGB', (width, total_height), SummaryImageGenerator.BG_START)
@@ -1396,15 +1529,34 @@ class SummaryImageGenerator:
                 name = title_item.get("name", "")
                 title_text = title_item.get("title", "")
                 reason = title_item.get("reason", "")
+                user_id = title_item.get("user_id", "")  # 获取 user_id
 
-                # 计算理由高度
-                max_reason_width = card_width - SummaryImageGenerator.CARD_PADDING * 2
+                # 计算称号徽章的实际宽度
+                title_bbox = font_subtitle.getbbox(title_text)
+                title_w = title_bbox[2] - title_bbox[0]
+                badge_w = title_w + 30
+
+                # 计算理由区域的可用宽度
+                # 布局: [PADDING] + [头像100] + [间距20] + [称号badge_w] + [间距40] + [理由...] + [PADDING]
+                avatar_and_spacing = 100 + 20 if user_id else 0  # 有头像才占用
+                badge_and_spacing = badge_w + 40  # 称号徽章 + 右侧间距
+
+                max_reason_width = (card_width - SummaryImageGenerator.CARD_PADDING * 2
+                                   - avatar_and_spacing - badge_and_spacing)
+                # 确保最小宽度,防止过窄
+                max_reason_width = max(max_reason_width, 200)
+
                 reason_lines = SummaryImageGenerator._wrap_text(reason, max_reason_width, font_small)
                 reason_line_height = font_small.getbbox('测试')[3] - font_small.getbbox('测试')[1]
                 title_line_height = font_subtitle.getbbox('测试')[3] - font_subtitle.getbbox('测试')[1]
 
-                card_height = 50 + title_line_height + 25 + len(reason_lines) * (reason_line_height + 8) + 30
-                card_height = max(card_height, 120)
+                # 新布局：卡片高度由头像高度和内容高度中的较大值决定
+                avatar_size = 100  # 头像尺寸
+                content_height = title_line_height + 8 + title_line_height + 20  # 称号 + 间距 + 名字 + 边距
+                reason_height = len(reason_lines) * (reason_line_height + 8) if reason_lines else 0
+
+                card_height = max(avatar_size + 60, content_height + 40, reason_height + 60)  # 60是上下边距
+                card_height = max(card_height, 160)  # 最小高度(增大以适应更大的头像)
 
                 # 彩色卡片
                 grad_start, grad_end, border_color = badge_colors[idx]
@@ -1425,60 +1577,43 @@ class SummaryImageGenerator:
                     border_color
                 )
 
-                # 第一行：装饰图标 + 群称号徽章 + 群友名称
+                # 新布局：左边头像 + 中间称号/名字(上下排列) + 右边理由
                 content_x = card_x + SummaryImageGenerator.CARD_PADDING
-                content_y = y + 35
+                content_y = y + 30
 
-                # 1. 添加装饰图标（根据排名选择）
-                deco_icons = [
-                    os.path.join(plugin_dir, "decorations", "decoration_star.png"),     # 第1名：星星
-                    os.path.join(plugin_dir, "decorations", "decoration_sparkle.png"),  # 第2名：闪光
-                    os.path.join(plugin_dir, "decorations", "decoration_heart.png"),    # 第3名：爱心
-                    os.path.join(plugin_dir, "decorations", "decoration_bubble.png"),   # 第4名：气泡
-                ]
-
-                icon_path = deco_icons[idx] if idx < len(deco_icons) else deco_icons[0]
-                icon_x = content_x
-                icon_y = content_y - 5
-
-                if os.path.exists(icon_path):
+                # 0. 添加用户头像（在最左边，放大）
+                avatar_size = 100  # 头像尺寸
+                avatar_added = False
+                if user_id:
                     try:
-                        icon_img = Image.open(icon_path).convert("RGBA")
-                        icon_w, icon_h = icon_img.size
-                        icon_scale = min(35 / icon_w, 35 / icon_h, 1.0)
-                        icon_new_w, icon_new_h = int(icon_w * icon_scale), int(icon_h * icon_scale)
-                        if icon_scale < 1.0:
-                            icon_img = icon_img.resize((icon_new_w, icon_new_h), Image.Resampling.LANCZOS)
+                        avatar = await SummaryImageGenerator._download_qq_avatar(user_id, size=640)
+                        if avatar:
+                            # 创建圆形头像
+                            circular_avatar = SummaryImageGenerator._create_circular_avatar(avatar, avatar_size)
 
-                        # 添加柔和光晕
-                        glow_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
-                        for offset in range(10, 0, -2):
-                            alpha = int(30 * (10 - offset) / 10)
-                            glow_temp = Image.new('RGBA', (icon_new_w + offset * 2, icon_new_h + offset * 2), (0, 0, 0, 0))
-                            glow_temp.paste(icon_img, (offset, offset), icon_img)
-                            color_layer = Image.new('RGBA', glow_temp.size, border_color + (alpha,))
-                            glow_temp = Image.alpha_composite(glow_temp, color_layer)
-                            glow_layer.paste(glow_temp, (icon_x - offset, icon_y - offset), glow_temp)
-
-                        glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=5))
-                        img = Image.alpha_composite(img, glow_layer)
-
-                        # 粘贴图标
-                        overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
-                        overlay.paste(icon_img, (icon_x, icon_y), icon_img)
-                        img = Image.alpha_composite(img, overlay)
-
-                        content_x += icon_new_w + 15  # 图标后留空隙
+                            # 添加带光晕的头像
+                            avatar_x = content_x
+                            avatar_y = content_y
+                            img = SummaryImageGenerator._add_avatar_glow(
+                                img,
+                                circular_avatar,
+                                (avatar_x, avatar_y),
+                                border_color,
+                                glow_radius=10
+                            )
+                            avatar_added = True
                     except Exception as e:
-                        logger.error(f"添加装饰图标失败: {e}")
+                        logger.error(f"添加用户头像失败 (QQ:{user_id}): {e}")
 
-                # 2. 绘制群称号徽章
-                title_bbox = font_subtitle.getbbox(title_text)
-                title_w = title_bbox[2] - title_bbox[0]
-                badge_w = title_w + 30
+                # 中间区域起始位置（头像右侧）
+                middle_x = content_x + avatar_size + 20 if avatar_added else content_x
+                middle_y = content_y
+
+                # 1. 绘制群称号徽章（在上方）
+                # title_w 和 badge_w 已经在前面计算过了
                 badge_h = title_line_height + 16
-                badge_x = content_x
-                badge_y = content_y - 3
+                badge_x = middle_x
+                badge_y = middle_y
 
                 img = SummaryImageGenerator._draw_gradient_badge(
                     img,
@@ -1490,12 +1625,12 @@ class SummaryImageGenerator:
                     grad_end
                 )
 
-                # 3. 绘制群友名称
+                # 2. 绘制群友名称（在称号下方）
                 text_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
                 text_draw = ImageDraw.Draw(text_layer)
 
-                name_x = badge_x + badge_w + 20
-                name_y = content_y
+                name_x = badge_x + 8  # 与称号对齐
+                name_y = badge_y + badge_h + 8  # 称号下方
 
                 # 群友名称（加粗效果）
                 for offset_x in [0, 1]:
@@ -1507,9 +1642,13 @@ class SummaryImageGenerator:
                             font=font_subtitle
                         )
 
-                # 4. 第二行：理由
-                reason_y = content_y + title_line_height + 25
-                reason_x = card_x + SummaryImageGenerator.CARD_PADDING
+                # 3. 右侧：理由（垂直居中对齐）
+                reason_x = badge_x + badge_w + 40  # 称号右侧留空隙
+
+                # 计算理由文本总高度,使其垂直居中
+                total_reason_height = len(reason_lines) * reason_line_height + (len(reason_lines) - 1) * 8 if len(reason_lines) > 0 else 0
+                reason_y = content_y + (avatar_size - total_reason_height) // 2 if avatar_added else middle_y + 10
+
                 for line in reason_lines:
                     SummaryImageGenerator._draw_text_with_shadow(
                         text_draw,
@@ -1707,8 +1846,212 @@ class SummaryImageGenerator:
 
                 y += card_height + SummaryImageGenerator.CARD_SPACING
 
+        # ===== 炫压抑指数区域 =====
+        if depression_index:
+            # 添加装饰性分隔线
+            img = SummaryImageGenerator._draw_decorative_divider(img, y + 10, width)
+            y += 40
+
+            # 标题
+            section_title = "炫压抑评级"
+            title_bbox = font_section_title.getbbox(section_title)
+            section_title_width = title_bbox[2] - title_bbox[0]
+            section_title_x = (width - section_title_width) // 2
+
+            # 彩色描边标题
+            img = SummaryImageGenerator._draw_colorful_text(
+                img,
+                (section_title_x, y + 30),
+                section_title,
+                font_section_title,
+                SummaryImageGenerator.TITLE_COLOR,
+                outline_color=SummaryImageGenerator.BORDER_PURPLE,
+                shadow_radius=8
+            )
+
+            # 添加decoration5装饰（炫压抑区域）
+            deco5_path = os.path.join(plugin_dir, "decorations", "decoration5.png")
+            img = SummaryImageGenerator._add_decoration_with_glow(
+                img,
+                deco5_path,
+                (section_title_x - 150, y + 10),
+                (120, 120),
+                SummaryImageGenerator.BORDER_PURPLE
+            )
+
+            # 右侧镜像
+            if os.path.exists(deco5_path):
+                try:
+                    deco5_img = Image.open(deco5_path).convert("RGBA")
+                    w, h = deco5_img.size
+                    scale = min(120 / w, 120 / h, 1.0)
+                    new_w, new_h = int(w * scale), int(h * scale)
+                    if scale < 1.0:
+                        deco5_img = deco5_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+                    deco5_flipped = deco5_img.transpose(Image.FLIP_LEFT_RIGHT)
+                    overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+                    paste_x = section_title_x + section_title_width + 30
+                    paste_y = y + 10
+
+                    # 添加柔和光晕
+                    glow_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
+                    for offset in range(15, 0, -2):
+                        alpha = int(40 * (15 - offset) / 15)
+                        glow_temp = Image.new('RGBA', (new_w + offset * 2, new_h + offset * 2), (0, 0, 0, 0))
+                        glow_temp.paste(deco5_flipped, (offset, offset), deco5_flipped)
+                        color_layer = Image.new('RGBA', glow_temp.size, SummaryImageGenerator.BORDER_PURPLE + (alpha,))
+                        glow_temp = Image.alpha_composite(glow_temp, color_layer)
+                        glow_layer.paste(glow_temp, (paste_x - offset, paste_y - offset), glow_temp)
+
+                    glow_layer = glow_layer.filter(ImageFilter.GaussianBlur(radius=8))
+                    img = Image.alpha_composite(img, glow_layer)
+
+                    overlay.paste(deco5_flipped, (paste_x, paste_y), deco5_flipped)
+                    img = Image.alpha_composite(img, overlay)
+                except Exception as e:
+                    logger.error(f"添加镜像decoration5失败: {e}")
+
+            y += 150
+
+            # 2列布局,每行2个用户
+            depression_list = depression_index[:4]  # 最多4个
+            col_width = (card_width - 30) // 2  # 两列,中间间距30
+
+            for row in range(0, len(depression_list), 2):
+                row_items = depression_list[row:row+2]
+
+                for col_idx, item in enumerate(row_items):
+                    name = item.get("name", "")
+                    rank = item.get("rank", "S")
+                    comment = item.get("comment", "")
+                    user_id = item.get("user_id", "")
+
+                    # 计算该卡片位置
+                    col_x = card_x + (col_width + 30) * col_idx
+                    card_h = 160  # 增加高度以容纳更长的文言文评价
+
+                    # rank颜色映射
+                    rank_colors = {
+                        "S": (SummaryImageGenerator.BORDER_MAGENTA, (255, 100, 150)),
+                        "A": (SummaryImageGenerator.BORDER_ORANGE, (255, 150, 100)),
+                        "B": (SummaryImageGenerator.BORDER_CYAN, (100, 200, 255)),
+                        "C": (SummaryImageGenerator.BORDER_GREEN, (120, 220, 150)),
+                        "D": (SummaryImageGenerator.BORDER_BLUE, (120, 180, 255)),
+                    }
+                    border_color, text_color = rank_colors.get(rank, rank_colors["S"])
+
+                    # 绘制卡片
+                    img = SummaryImageGenerator._draw_colorful_card(
+                        img,
+                        (col_x, y, col_x + col_width, y + card_h),
+                        border_color,
+                        radius=20,
+                        shadow_strength=12
+                    )
+
+                    # 头像(100px,左侧)
+                    avatar_added = False
+                    avatar_size = 100
+                    avatar_x = col_x + 20  # 左侧边距20
+                    avatar_y = y + (card_h - avatar_size) // 2  # 垂直居中
+
+                    if user_id:
+                        try:
+                            avatar = await SummaryImageGenerator._download_qq_avatar(user_id, size=640)
+                            if avatar:
+                                circular_avatar = SummaryImageGenerator._create_circular_avatar(avatar, avatar_size)
+                                img = SummaryImageGenerator._add_avatar_glow(
+                                    img,
+                                    circular_avatar,
+                                    (avatar_x, avatar_y),
+                                    border_color,
+                                    glow_radius=8
+                                )
+                                avatar_added = True
+                        except Exception as e:
+                            logger.error(f"添加炫压抑指数头像失败 (QQ:{user_id}): {e}")
+
+                    # 文字层 - 右侧显示评级和评价
+                    text_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
+                    text_draw = ImageDraw.Draw(text_layer)
+
+                    # 右侧区域起始位置
+                    right_x = col_x + 20 + avatar_size + 15  # 头像右侧15px间距
+
+                    # Rank大号显示(不要括号)，垂直居中
+                    rank_text = rank  # 直接显示S,不要[S]
+
+                    # 计算Rank的尺寸
+                    rank_bbox = font_section_title.getbbox(rank_text)
+                    rank_width = rank_bbox[2] - rank_bbox[0]
+                    rank_height = rank_bbox[3] - rank_bbox[1]
+
+                    # 评价区域宽度
+                    max_comment_width = col_width - 20 - avatar_size - 15 - rank_width - 20 - 20
+
+                    # 先计算评价文本的行数和总高度
+                    comment_lines = SummaryImageGenerator._wrap_text(comment, max_comment_width, font_small)
+                    comment_line_height = font_small.getbbox('测试')[3] - font_small.getbbox('测试')[1]
+                    total_comment_height = len(comment_lines) * comment_line_height + (len(comment_lines) - 1) * 5
+
+                    # 计算内容总高度（取rank和comment的最大值）
+                    content_height = max(rank_height, total_comment_height)
+
+                    # 垂直居中起始y位置
+                    right_y = y + (card_h - content_height) // 2
+
+                    # 绘制Rank - 添加发光特效
+                    # 1. 外层光晕（多层渐变）
+                    for glow_radius in range(15, 0, -3):
+                        glow_alpha = int(80 * (glow_radius / 15))
+                        glow_color = text_color + (glow_alpha,)
+                        for gx in range(-glow_radius, glow_radius + 1, 2):
+                            for gy in range(-glow_radius, glow_radius + 1, 2):
+                                if gx*gx + gy*gy <= glow_radius*glow_radius:
+                                    text_draw.text(
+                                        (right_x + gx, right_y + gy),
+                                        rank_text,
+                                        font=font_section_title,
+                                        fill=glow_color
+                                    )
+
+                    # 2. 加粗主体文字
+                    for offset_x in [0, 1, 2]:
+                        for offset_y in [0, 1, 2]:
+                            text_draw.text(
+                                (right_x + offset_x, right_y + offset_y),
+                                rank_text,
+                                font=font_section_title,
+                                fill=text_color
+                            )
+
+                    # 评价(在rank右侧，垂直对齐到内容中心)
+                    comment_x = right_x + rank_width + 20  # Rank右侧20px间距
+                    comment_y = right_y + (content_height - total_comment_height) // 2  # 垂直居中对齐
+
+                    # 文本换行绘制
+                    for line in comment_lines:
+                        SummaryImageGenerator._draw_text_with_shadow(
+                            text_draw,
+                            (comment_x, comment_y),
+                            line,
+                            font_small,
+                            SummaryImageGenerator.TEXT_COLOR,
+                            shadow_offset=1
+                        )
+                        comment_y += comment_line_height + 5
+
+                    img = Image.alpha_composite(img, text_layer)
+
+                # 每行之后增加y（在内层循环结束后）
+                if col_idx == len(row_items) - 1:  # 只在处理完一行后增加
+                    y += card_h + 25
+
+            y += 10
+
         # ===== 底部装饰 =====
-        y += 50
+        y += 30  # 减少底部间距
 
         # 添加decoration2作为底部大型装饰
         deco2_path = os.path.join(plugin_dir, "decorations", "decoration2.png")
@@ -1716,8 +2059,8 @@ class SummaryImageGenerator:
             try:
                 deco2_img = Image.open(deco2_path).convert("RGBA")
                 w, h = deco2_img.size
-                # 确保完整显示，调整最大尺寸
-                scale = min(300 / w, 180 / h, 1.0)
+                # 确保完整显示，调整最大尺寸（缩小装饰）
+                scale = min(250 / w, 140 / h, 1.0)
                 new_w, new_h = int(w * scale), int(h * scale)
                 if scale < 1.0:
                     deco2_img = deco2_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
@@ -1735,13 +2078,13 @@ class SummaryImageGenerator:
             except Exception as e:
                 logger.error(f"添加decoration2失败: {e}")
 
-        # 添加气泡装饰
+        # 添加气泡装饰（调整位置）
         bubble_path = os.path.join(plugin_dir, "decorations", "decoration_bubble.png")
         bubble_positions = [
-            (120, y + 20),
-            (width - 170, y + 30),
-            (180, y + 100),
-            (width - 230, y + 110),
+            (120, y + 15),
+            (width - 170, y + 20),
+            (180, y + 70),
+            (width - 230, y + 75),
         ]
         for pos in bubble_positions:
             img = SummaryImageGenerator._add_decoration_with_glow(

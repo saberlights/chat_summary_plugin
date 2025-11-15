@@ -135,6 +135,7 @@ class ChatSummaryCommand(BaseCommand):
                     participant_count = 0
                     user_titles = []
                     golden_quotes = []
+                    depression_index = []
                     hourly_distribution = {}
 
                     if not target_user:
@@ -166,8 +167,13 @@ class ChatSummaryCommand(BaseCommand):
                         if self.get_config("summary.enable_golden_quotes", True):
                             golden_quotes = await ChatAnalysisUtils.analyze_golden_quotes(messages) or []
 
+                        # 分析炫压抑指数（如果启用）
+                        depression_index = []
+                        if self.get_config("summary.enable_depression_index", True):
+                            depression_index = await ChatAnalysisUtils.analyze_depression_index(messages, user_stats) or []
+
                     # 生成图片并获取临时文件路径
-                    img_path = SummaryImageGenerator.generate_summary_image(
+                    img_path = await SummaryImageGenerator.generate_summary_image(
                         title=title,
                         summary_text=summary,
                         time_info=datetime.now().strftime("%Y-%m-%d"),
@@ -175,6 +181,7 @@ class ChatSummaryCommand(BaseCommand):
                         participant_count=participant_count,
                         user_titles=user_titles,
                         golden_quotes=golden_quotes,
+                        depression_index=depression_index,
                         hourly_distribution=hourly_distribution
                     )
 
@@ -349,14 +356,16 @@ class ChatSummaryCommand(BaseCommand):
 
 请用你自己的说话方式，自然地讲讲这个人今天都在群里说了什么，聊了哪些事。不要列点，不要分段标题，就像你在给朋友复述一样。
 
+【重要约束】字数必须严格控制在{max_words}字以内！这是硬性要求！
+
 要求：
 - 用口语化、轻松的语气
 - 把有意思的话题和细节自然地穿插进去
 - 可以适当加点你自己的评论或感受
 - 不要用"首先""其次""总之"这种生硬的词
-- 字数{max_words}字以内
+- 总字数不得超过{max_words}字
 
-直接开始讲，想怎么说就怎么说。"""
+直接开始讲，想怎么说就怎么说。记住：必须在{max_words}字以内完成！"""
             else:
                 # 获取群聊总结的字数限制
                 max_words = self.get_config("summary.group_summary_max_words", 400)
@@ -376,15 +385,17 @@ class ChatSummaryCommand(BaseCommand):
 
 请像给朋友讲故事一样复述群里发生了什么。
 
+【重要约束】字数必须严格控制在{max_words}字以内！这是硬性要求！
+
 要求：
 1. 按时间顺序讲，保持连贯性
 2. 精彩内容详细说，平淡内容略过
 3. 对话要说清谁说了什么、谁怎么回的
 4. 必须有具体人名和具体内容，不要抽象描述
 5. 口语化，不要用"首先""其次""然后""总之"这类词
-6. {max_words}字内，内容水就少说
+6. 总字数不得超过{max_words}字
 
-直接开始，不要标题。"""
+直接开始，不要标题。记住：必须在{max_words}字以内完成！"""
 
             # 使用LLM生成总结
             # 使用主回复模型 (replyer)
@@ -400,7 +411,7 @@ class ChatSummaryCommand(BaseCommand):
                 logger.error(f"LLM生成总结失败: {summary}")
                 return None
 
-            # 直接返回总结内容，不添加额外装饰
+            # 返回总结内容
             return summary.strip()
 
         except Exception as e:
@@ -663,8 +674,13 @@ class DailySummaryEventHandler(BaseEventHandler):
                             if self.get_config("summary.enable_golden_quotes", True):
                                 golden_quotes = await ChatAnalysisUtils.analyze_golden_quotes(messages) or []
 
+                            # 分析炫压抑指数（如果启用）
+                            depression_index = []
+                            if self.get_config("summary.enable_depression_index", True):
+                                depression_index = await ChatAnalysisUtils.analyze_depression_index(messages, user_stats) or []
+
                             # 生成图片并获取临时文件路径
-                            img_path = SummaryImageGenerator.generate_summary_image(
+                            img_path = await SummaryImageGenerator.generate_summary_image(
                                 title="📊 今日群聊总结",
                                 summary_text=summary,
                                 time_info=datetime.now().strftime("%Y-%m-%d"),
@@ -672,6 +688,7 @@ class DailySummaryEventHandler(BaseEventHandler):
                                 participant_count=len(participants),
                                 user_titles=user_titles,
                                 golden_quotes=golden_quotes,
+                                depression_index=depression_index,
                                 hourly_distribution=hourly_distribution
                             )
 
@@ -776,15 +793,17 @@ class DailySummaryEventHandler(BaseEventHandler):
 
 请像给朋友讲故事一样复述群里发生了什么。
 
+【重要约束】字数必须严格控制在{max_words}字以内！这是硬性要求！
+
 要求：
 1. 按时间顺序讲，保持连贯性
 2. 精彩内容详细说，平淡内容略过
 3. 对话要说清谁说了什么、谁怎么回的
 4. 必须有具体人名和具体内容，不要抽象描述
 5. 口语化，不要用"首先""其次""然后""总之"这类词
-6. {max_words}字内，内容水就少说
+6. 总字数不得超过{max_words}字
 
-直接开始，不要标题。"""
+直接开始，不要标题。记住：必须在{max_words}字以内完成！"""
 
             # 使用LLM生成总结
             model_task_config = model_config.model_task_config.replyer
@@ -839,6 +858,7 @@ class ChatSummaryPlugin(BasePlugin):
             "enable_user_summary": ConfigField(type=bool, default=True, description="是否启用单个用户的聊天总结"),
             "enable_user_titles": ConfigField(type=bool, default=True, description="是否启用群友称号分析"),
             "enable_golden_quotes": ConfigField(type=bool, default=True, description="是否启用金句提取"),
+            "enable_depression_index": ConfigField(type=bool, default=True, description="是否启用炫压抑指数分析"),
         },
         "auto_summary": {
             "enabled": ConfigField(type=bool, default=False, description="是否启用每日自动总结"),
