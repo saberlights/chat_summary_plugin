@@ -137,6 +137,7 @@ class ChatSummaryCommand(BaseCommand):
                     golden_quotes = []
                     depression_index = []
                     hourly_distribution = {}
+                    user_profile = None
 
                     if not target_user:
                         participants = set()
@@ -171,6 +172,10 @@ class ChatSummaryCommand(BaseCommand):
                         depression_index = []
                         if self.get_config("summary.enable_depression_index", True):
                             depression_index = await ChatAnalysisUtils.analyze_depression_index(messages, user_stats) or []
+                    else:
+                        # 单个用户模式：分析用户画像
+                        if self.get_config("summary.enable_user_summary", True):
+                            user_profile = await ChatAnalysisUtils.analyze_user_profile(messages, user_display_name) or None
 
                     # 生成图片并获取临时文件路径
                     img_path = await SummaryImageGenerator.generate_summary_image(
@@ -182,7 +187,8 @@ class ChatSummaryCommand(BaseCommand):
                         user_titles=user_titles,
                         golden_quotes=golden_quotes,
                         depression_index=depression_index,
-                        hourly_distribution=hourly_distribution
+                        hourly_distribution=hourly_distribution,
+                        user_profile=user_profile
                     )
 
                     # 发送图片

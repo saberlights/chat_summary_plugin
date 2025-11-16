@@ -949,7 +949,8 @@ class SummaryImageGenerator:
         user_titles: list = None,
         golden_quotes: list = None,
         depression_index: list = None,
-        hourly_distribution: dict = None
+        hourly_distribution: dict = None,
+        user_profile: dict = None
     ) -> str:
         """生成聊天总结图片 - 霓虹赛博朋克风格
 
@@ -964,6 +965,7 @@ class SummaryImageGenerator:
             golden_quotes: 金句列表
             depression_index: 炫压抑指数列表
             hourly_distribution: 24小时发言分布数据 {hour: count}
+            user_profile: 单个用户画像数据 {tags, active_time, fun_score, fun_comment, topic_leadership, topic_comment, rank_title, rank_desc, mood, mood_score, mood_reason}
 
         Returns:
             str: 临时图片文件的绝对路径
@@ -995,6 +997,22 @@ class SummaryImageGenerator:
         summary_card_height = 0
         titles_section_height = 0
         quotes_section_height = 0
+        user_profile_height = 0
+
+        # 如果是用户画像模式，计算用户画像相关区域高度
+        if user_profile:
+            # 分隔线区域
+            user_profile_height += 50
+
+            # 动态计算三个指标区域的高度
+            # 每个指标：标题行(35) + 评价文本(约40，按2行算) + 间距(20) = 95
+            # 三个指标：95 * 3 = 285
+            # 加上分隔线和间距：285 + 30 = 315
+            indicators_height = 315
+
+            # 整体卡片高度：顶部信息区(155，增加了心情理由间距) + 三个指标区域(315) + 底部间距(20)
+            total_card_height = 155 + indicators_height + 20
+            user_profile_height += total_card_height + 30  # 卡片 + 间距
 
         # 计算24小时分布图表高度
         if hourly_distribution and any(hourly_distribution.values()):
@@ -1047,7 +1065,7 @@ class SummaryImageGenerator:
 
         # 总高度（底部装饰区域）
         footer_height = 160  # 减少底部空白
-        total_height = header_height + hourly_chart_height + summary_card_height + titles_section_height + quotes_section_height + depression_index_height + footer_height
+        total_height = header_height + hourly_chart_height + summary_card_height + titles_section_height + quotes_section_height + depression_index_height + user_profile_height + footer_height
 
         # ===== 创建图片 =====
         img = Image.new('RGB', (width, total_height), SummaryImageGenerator.BG_START)
@@ -2049,6 +2067,369 @@ class SummaryImageGenerator:
                     y += card_h + 25
 
             y += 10
+
+        # ===== 用户画像区域=====
+        if user_profile:
+            # 提取用户画像数据
+            user_id = user_profile.get("user_id", "")
+            tags = user_profile.get("tags", [])
+            active_time = user_profile.get("active_time", "")
+            fun_score = user_profile.get("fun_score", 50)
+            fun_comment = user_profile.get("fun_comment", "")
+            topic_leadership = user_profile.get("topic_leadership", 50)
+            topic_comment = user_profile.get("topic_comment", "")
+            rank_title = user_profile.get("rank_title", "")
+            rank_desc = user_profile.get("rank_desc", "")
+            mood = user_profile.get("mood", "中性")
+            mood_score = user_profile.get("mood_score", 50)
+            mood_reason = user_profile.get("mood_reason", "")
+
+            # 添加装饰性分隔线
+            img = SummaryImageGenerator._draw_decorative_divider(img, y + 10, width)
+            y += 50  # 减少间距
+
+            # 计算整体卡片高度（与前面计算保持一致）
+            indicators_height = 315
+            total_card_height = 155 + indicators_height + 20  # 顶部信息155 + 三个指标315 + 底部间距20
+
+            # 绘制整体卡片
+            card_x = SummaryImageGenerator.PADDING
+            card_width = width - SummaryImageGenerator.PADDING * 2
+
+            img = SummaryImageGenerator._draw_colorful_card(
+                img,
+                (card_x, y, card_x + card_width, y + total_card_height),
+                SummaryImageGenerator.BORDER_CYAN,
+                radius=20,
+                shadow_strength=12
+            )
+
+            # === 顶部区域：左侧头像 + 右侧所有信息 ===
+            top_y = y + 20
+            avatar_size = 100
+            avatar_x = card_x + 25
+
+            # 下载并绘制QQ头像
+            if user_id:
+                avatar_img = await SummaryImageGenerator._download_qq_avatar(user_id, size=140)
+                if avatar_img:
+                    avatar_img = avatar_img.resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
+                    mask = Image.new('L', (avatar_size, avatar_size), 0)
+                    mask_draw = ImageDraw.Draw(mask)
+                    mask_draw.ellipse((0, 0, avatar_size, avatar_size), fill=255)
+                    avatar_img.putalpha(mask)
+
+                    glow_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
+                    # 增强光晕效果：更多层次，更高透明度，更粗线条
+                    for i in range(8, 0, -1):
+                        glow_draw = ImageDraw.Draw(glow_layer)
+                        glow_draw.ellipse(
+                            (avatar_x - i*2, top_y - i*2, avatar_x + avatar_size + i*2, top_y + avatar_size + i*2),
+                            outline=SummaryImageGenerator.BORDER_CYAN + (int(255 * (i / 8) * 0.8),),  # 透明度提升到80%
+                            width=2
+                        )
+                    img = Image.alpha_composite(img, glow_layer)
+                    img.paste(avatar_img, (avatar_x, top_y), avatar_img)
+
+            # 右侧信息区域
+            info_x = avatar_x + avatar_size + 20
+            info_y = top_y + 5
+
+            text_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
+            text_draw = ImageDraw.Draw(text_layer)
+
+            # 1. 个性标签（横向排列，支持1-3个）
+            current_x = info_x
+            if tags:
+                # 定义3种渐变色方案
+                gradient_colors = [
+                    (SummaryImageGenerator.GRADIENT_1_START, SummaryImageGenerator.GRADIENT_1_END),
+                    (SummaryImageGenerator.GRADIENT_2_START, SummaryImageGenerator.GRADIENT_2_END),
+                    (SummaryImageGenerator.GRADIENT_3_START, SummaryImageGenerator.GRADIENT_3_END),
+                ]
+
+                for i, tag_text in enumerate(tags[:3]):  # 支持最多3个标签
+                    tag_bbox = font_text.getbbox(tag_text)
+                    tag_w = tag_bbox[2] - tag_bbox[0] + 20
+                    tag_h = font_text.getbbox('测试')[3] - font_text.getbbox('测试')[1] + 10
+
+                    # 使用对应的渐变色
+                    gradient_start, gradient_end = gradient_colors[i % 3]
+
+                    # 使用平均颜色绘制圆角矩形背景
+                    r = int((gradient_start[0] + gradient_end[0]) / 2)
+                    g = int((gradient_start[1] + gradient_end[1]) / 2)
+                    b = int((gradient_start[2] + gradient_end[2]) / 2)
+
+                    text_draw.rounded_rectangle(
+                        (current_x, info_y, current_x + tag_w, info_y + tag_h),
+                        radius=8,
+                        fill=(r, g, b, 200)
+                    )
+
+                    # 绘制标签文本
+                    text_bbox = font_text.getbbox(tag_text)
+                    text_x = current_x + (tag_w - (text_bbox[2] - text_bbox[0])) // 2
+                    text_y = info_y + (tag_h - (text_bbox[3] - text_bbox[1])) // 2
+                    text_draw.text((text_x, text_y), tag_text, fill=(255, 255, 255, 255), font=font_text)
+
+                    current_x += tag_w + 10
+
+            info_y += 45  # 增加间距，避免标签和活跃时段太紧凑
+
+            # 2. 活跃时段
+            active_label = f"活跃时段: {active_time}"
+            SummaryImageGenerator._draw_text_with_shadow(
+                text_draw,
+                (info_x, info_y),
+                active_label,
+                font_text,
+                SummaryImageGenerator.SUBTITLE_COLOR,
+                shadow_offset=1
+            )
+
+            info_y += font_text.getbbox('测试')[3] - font_text.getbbox('测试')[1] + 15
+
+            # 3. 心情指数
+            mood_text = f"心情: {mood} {mood_score}分"
+            mood_text_y = info_y  # 保存心情文本的y坐标
+            SummaryImageGenerator._draw_text_with_shadow(
+                text_draw,
+                (info_x, info_y),
+                mood_text,
+                font_text,
+                SummaryImageGenerator.TITLE_COLOR,
+                shadow_offset=1
+            )
+
+            mood_text_height = font_text.getbbox('测试')[3] - font_text.getbbox('测试')[1]
+            info_y += mood_text_height + 10
+
+            # 心情进度条（简化计算）
+            bar_width = 200  # 固定宽度200px，更直观
+            bar_height = 8
+            bar_x = info_x
+            bar_y = info_y
+
+            text_draw.rounded_rectangle(
+                (bar_x, bar_y, bar_x + bar_width, bar_y + bar_height),
+                radius=4,
+                fill=(50, 55, 65, 180)
+            )
+
+            filled_width = int(bar_width * mood_score / 100)
+            if filled_width > 0:
+                if mood_score >= 70:
+                    bar_color = (100, 255, 150, 255)
+                elif mood_score >= 40:
+                    bar_color = (255, 200, 100, 255)
+                else:
+                    bar_color = (255, 100, 100, 255)
+
+                text_draw.rounded_rectangle(
+                    (bar_x, bar_y, bar_x + filled_width, bar_y + bar_height),
+                    radius=4,
+                    fill=bar_color
+                )
+
+            # 心情理由（显示在进度条右侧，垂直居中于心情文本和进度条之间）
+            reason_x = bar_x + bar_width + 15  # 进度条右侧15px
+            reason_max_width = card_width - (reason_x - card_x) - 30  # 剩余宽度
+
+            # 计算心情文本和进度条的中间位置
+            # 心情文本顶部: mood_text_y
+            # 进度条底部: bar_y + bar_height
+            # 中间位置: (mood_text_y + bar_y + bar_height) / 2
+            reason_y = (mood_text_y + bar_y + bar_height) // 2 - (font_small.getbbox('测试')[3] - font_small.getbbox('测试')[1]) // 2
+
+            # 如果剩余宽度足够，显示在右侧；否则换行到下方
+            if reason_max_width > 150:  # 至少需要150px宽度
+                # 单行显示在右侧，垂直居中
+                mood_reason_short = mood_reason[:30] + "..." if len(mood_reason) > 30 else mood_reason
+                SummaryImageGenerator._draw_text_with_shadow(
+                    text_draw,
+                    (reason_x, reason_y),
+                    mood_reason_short,
+                    font_small,
+                    SummaryImageGenerator.LIGHT_TEXT_COLOR,
+                    shadow_offset=1
+                )
+                info_y += 30  # 增加间距从20到30
+            else:
+                # 换行到下方
+                info_y += 25  # 增加间距
+                mood_reason_lines = SummaryImageGenerator._wrap_text(mood_reason, card_width - (info_x - card_x) - 40, font_small)
+                for line in mood_reason_lines[:1]:  # 最多显示1行
+                    SummaryImageGenerator._draw_text_with_shadow(
+                        text_draw,
+                        (info_x, info_y),
+                        line,
+                        font_small,
+                        SummaryImageGenerator.LIGHT_TEXT_COLOR,
+                        shadow_offset=1
+                    )
+                    info_y += font_small.getbbox('测试')[3] - font_small.getbbox('测试')[1] + 8  # 增加间距
+
+            img = Image.alpha_composite(img, text_layer)
+
+            # === 三个新指标区域 ===
+            indicators_y = y + 145 + 30  # 增加间距从20到30
+
+            # 主分隔线
+            line_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
+            line_draw = ImageDraw.Draw(line_layer)
+            line_draw.line(
+                [(card_x + 30, indicators_y), (card_x + card_width - 30, indicators_y)],
+                fill=SummaryImageGenerator.BORDER_CYAN + (100,),
+                width=2
+            )
+            img = Image.alpha_composite(img, line_layer)
+
+            indicators_y += 30
+
+            # 创建文本图层
+            text_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
+            text_draw = ImageDraw.Draw(text_layer)
+
+            # 计算最大宽度
+            max_comment_width = card_width - 80
+
+            # === 1. 整活质量评分 ===
+            # 标题和分数
+            SummaryImageGenerator._draw_text_with_shadow(
+                text_draw,
+                (card_x + 40, indicators_y),
+                "整活质量",
+                font_text,
+                SummaryImageGenerator.TITLE_COLOR,
+                shadow_offset=1
+            )
+            score_text = f"{fun_score}分"
+            score_bbox = font_section_title.getbbox(score_text)
+            score_width = score_bbox[2] - score_bbox[0]
+            SummaryImageGenerator._draw_text_with_shadow(
+                text_draw,
+                (card_x + card_width - score_width - 40, indicators_y - 3),
+                score_text,
+                font_section_title,
+                SummaryImageGenerator.BORDER_CYAN,
+                shadow_offset=2
+            )
+            indicators_y += 32
+
+            # 评价文本
+            fun_comment_lines = SummaryImageGenerator._wrap_text(fun_comment, max_comment_width, font_small)
+            for idx, line in enumerate(fun_comment_lines[:2]):
+                SummaryImageGenerator._draw_text_with_shadow(
+                    text_draw,
+                    (card_x + 40, indicators_y),
+                    line,
+                    font_small,
+                    SummaryImageGenerator.LIGHT_TEXT_COLOR,
+                    shadow_offset=1
+                )
+                indicators_y += font_small.getbbox('测试')[3] - font_small.getbbox('测试')[1] + 4
+
+            indicators_y += 18
+
+            # 小分隔线
+            line_draw = ImageDraw.Draw(line_layer)
+            line_draw.line(
+                [(card_x + 40, indicators_y), (card_x + card_width - 40, indicators_y)],
+                fill=SummaryImageGenerator.BORDER_CYAN + (50,),
+                width=1
+            )
+            img = Image.alpha_composite(img, line_layer)
+            indicators_y += 18
+
+            # === 2. 话题引导力 ===
+            # 标题和分数
+            SummaryImageGenerator._draw_text_with_shadow(
+                text_draw,
+                (card_x + 40, indicators_y),
+                "话题引导力",
+                font_text,
+                SummaryImageGenerator.TITLE_COLOR,
+                shadow_offset=1
+            )
+            leadership_text = f"{topic_leadership}分"
+            leadership_bbox = font_section_title.getbbox(leadership_text)
+            leadership_width = leadership_bbox[2] - leadership_bbox[0]
+            SummaryImageGenerator._draw_text_with_shadow(
+                text_draw,
+                (card_x + card_width - leadership_width - 40, indicators_y - 3),
+                leadership_text,
+                font_section_title,
+                SummaryImageGenerator.GRADIENT_2_START,
+                shadow_offset=2
+            )
+            indicators_y += 32
+
+            # 评价文本
+            topic_comment_lines = SummaryImageGenerator._wrap_text(topic_comment, max_comment_width, font_small)
+            for idx, line in enumerate(topic_comment_lines[:2]):
+                SummaryImageGenerator._draw_text_with_shadow(
+                    text_draw,
+                    (card_x + 40, indicators_y),
+                    line,
+                    font_small,
+                    SummaryImageGenerator.LIGHT_TEXT_COLOR,
+                    shadow_offset=1
+                )
+                indicators_y += font_small.getbbox('测试')[3] - font_small.getbbox('测试')[1] + 4
+
+            indicators_y += 18
+
+            # 小分隔线
+            line_layer = Image.new('RGBA', img.size, (0, 0, 0, 0))
+            line_draw = ImageDraw.Draw(line_layer)
+            line_draw.line(
+                [(card_x + 40, indicators_y), (card_x + card_width - 40, indicators_y)],
+                fill=SummaryImageGenerator.BORDER_CYAN + (50,),
+                width=1
+            )
+            img = Image.alpha_composite(img, line_layer)
+            indicators_y += 18
+
+            # === 3. 段位评定 ===
+            # 标题和段位名称
+            SummaryImageGenerator._draw_text_with_shadow(
+                text_draw,
+                (card_x + 40, indicators_y),
+                "今日段位",
+                font_text,
+                SummaryImageGenerator.TITLE_COLOR,
+                shadow_offset=1
+            )
+            # 段位名称右对齐
+            rank_bbox = font_section_title.getbbox(rank_title)
+            rank_width = rank_bbox[2] - rank_bbox[0]
+            SummaryImageGenerator._draw_text_with_shadow(
+                text_draw,
+                (card_x + card_width - rank_width - 40, indicators_y - 3),
+                rank_title,
+                font_section_title,
+                SummaryImageGenerator.GRADIENT_3_START,
+                shadow_offset=2
+            )
+            indicators_y += 32
+
+            # 段位描述
+            rank_desc_lines = SummaryImageGenerator._wrap_text(rank_desc, max_comment_width, font_small)
+            for idx, line in enumerate(rank_desc_lines[:2]):
+                SummaryImageGenerator._draw_text_with_shadow(
+                    text_draw,
+                    (card_x + 40, indicators_y),
+                    line,
+                    font_small,
+                    SummaryImageGenerator.LIGHT_TEXT_COLOR,
+                    shadow_offset=1
+                )
+                indicators_y += font_small.getbbox('测试')[3] - font_small.getbbox('测试')[1] + 4
+
+            img = Image.alpha_composite(img, text_layer)
+
+            y += total_card_height + 25
 
         # ===== 底部装饰 =====
         y += 30  # 减少底部间距

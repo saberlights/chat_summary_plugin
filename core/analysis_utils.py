@@ -539,6 +539,361 @@ class ChatAnalysisUtils:
         return validated[:4]  # 只返回前4个
 
     @staticmethod
+    async def analyze_user_profile(
+        messages: List[dict],
+        user_name: str,
+        get_config: Callable = None
+    ) -> Optional[Dict[str, Any]]:
+        """分析单个用户的个人画像
+
+        Args:
+            messages: 用户的聊天记录列表
+            user_name: 用户昵称
+            get_config: 配置获取函数（可选）
+
+        Returns:
+            用户画像数据，格式: {
+                user_id: "QQ号",  # 用户ID
+                tags: [标签1, 标签2],  # 1-2个个性标签
+                active_hours: "18:00-23:00",  # 活跃时段描述
+                fun_score: 85,  # 整活质量评分 0-100
+                fun_comment: "整活评价",  # 简短评价
+                topic_leadership: 75,  # 话题引导力 0-100
+                topic_comment: "话题引导评价",
+                rank_title: "黄金话痨III",  # 段位称号
+                rank_desc: "段位描述",
+                mood: "积极/中性/消极",
+                mood_score: 0-100  # 心情分数
+            }
+        """
+        try:
+            if not messages:
+                return None
+
+            # 获取用户ID（从第一条消息中提取）
+            user_id = str(messages[0].get("user_id", "")) if messages else ""
+
+            # 统计基础数据
+            hours_counter = Counter()
+            all_texts = []
+
+            for msg in messages:
+                timestamp = msg.get("time", 0)
+                hour = datetime.fromtimestamp(timestamp).hour
+                hours_counter[hour] += 1
+
+                text = msg.get("processed_plain_text", "")
+                if len(text) >= 5:  # 收集有效发言
+                    all_texts.append(text)
+
+            # 找出最活跃的时段
+            if hours_counter:
+                most_active_hours = hours_counter.most_common(3)
+                active_hours_list = sorted([h for h, _ in most_active_hours])
+            else:
+                active_hours_list = []
+
+            # 构建聊天记录样本（最多15条）
+            sample_texts = all_texts[:15] if len(all_texts) > 15 else all_texts
+            chat_sample = "\n".join([f"- {text[:80]}" for text in sample_texts])
+
+            # 构建统计信息
+            total_chars = sum(len(text) for text in all_texts)
+            avg_chars = total_chars / len(all_texts) if all_texts else 0
+            emoji_count = sum(ChatAnalysisUtils.count_emojis(text) for text in all_texts)
+            emoji_ratio = emoji_count / len(all_texts) if all_texts else 0
+
+            # 统计时段分布
+            morning = sum(hours_counter[h] for h in range(6, 12))  # 6-12点
+            afternoon = sum(hours_counter[h] for h in range(12, 18))  # 12-18点
+            evening = sum(hours_counter[h] for h in range(18, 24))  # 18-24点
+            night = sum(hours_counter[h] for h in range(0, 6))  # 0-6点
+
+            time_distribution = f"早{morning}条/午{afternoon}条/晚{evening}条/夜{night}条"
+
+            # 计算更多维度的统计
+            total_messages = len(messages)
+            # 话题关键词（简单统计）
+            words_freq = Counter()
+            for text in all_texts:
+                # 简单分词（按空格和标点）
+                words = re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z]+', text)
+                words_freq.update([w for w in words if len(w) >= 2])
+            top_words = ', '.join([w for w, _ in words_freq.most_common(5)])
+
+            # 互动特征（简单判断）
+            question_count = sum(1 for text in all_texts if '?' in text or '？' in text)
+            question_ratio = question_count / total_messages if total_messages > 0 else 0
+
+            # 构建 prompt
+            prompt = f"""分析这个用户的聊天画像（娱乐向，有趣但不失真实）。
+
+用户基础数据：
+- 用户名：{user_name}
+- 发言数：{total_messages}条
+- 平均长度：{avg_chars:.1f}字/条
+- 表情使用：{emoji_ratio:.2f}个/条
+- 提问比例：{question_ratio:.2f}
+
+时间特征：
+- 时段分布：{time_distribution}
+- 最活跃时段：{', '.join([f'{h}点' for h in active_hours_list[:3]])}
+
+内容特征：
+- 高频词：{top_words}
+
+发言样本（最近{len(sample_texts)}条）：
+{chat_sample}
+
+要求：
+1. tags: 1-3个有趣的个性标签（3-6字），基于真实数据，避免陈词滥调
+   - 参考维度：时间特征（夜猫子/早起鸟）、表达风格（表情包选手/文字工匠）、互动特征（好奇宝宝/话题终结者）、情绪倾向（开心果/emo精）
+   - 例如："深夜哲学家"、"表情包达人"、"提问小能手"、"简洁派发言"
+
+2. active_time: 描述活跃时段特征（12-15字），有趣且准确
+   - 例如："深夜冲浪型选手"、"朝九晚五社畜"、"全天候在线人"
+
+3. fun_score: 整活质量评分（0-100）
+   - 0-30: 发言平淡无趣，无亮点
+   - 31-60: 偶尔有梗，但不够出彩
+   - 61-85: 经常有有趣发言，能活跃气氛
+   - 86-100: 群聊灵魂，笑点制造机
+
+4. fun_comment: 整活质量评价（18-25字），幽默点评今天的有趣发言
+   - 例如："3次神回复让群友笑喷，段子手潜质显现"
+   - 或："发言质朴无华，建议多学习群友整活"
+
+5. topic_leadership: 话题引导力（0-100）
+   - 基于发言是否引发他人回复、讨论热度等
+   - 0-30: 话题终结者，发言无人接
+   - 31-60: 偶尔能引起讨论
+   - 61-85: 经常引发话题，有带动力
+   - 86-100: 群聊节奏大师，一呼百应
+
+6. topic_comment: 话题引导力评价（18-25字）
+   - 例如："发起2个热门话题，群友积极响应"
+   - 或："发言自说自话，缺乏互动吸引力"
+
+7. rank_title: 段位称号（6-10字），根据综合表现评定
+   - 参考维度：发言数、质量、互动、活跃时段等
+   - 例如："黄金话痨III"、"钻石夜猫I"、"青铜潜水员V"、"白银表情包II"
+   - 段位等级：青铜 < 白银 < 黄金 < 铂金 < 钻石 < 大师 < 王者
+   - 每个等级有I到V五个小段位
+
+8. rank_desc: 段位描述（20-28字），说明为什么是这个段位
+   - 例如："今日发言50条且质量上乘，晋升在即"
+   - 或："潜水选手，发言稀少，建议多冒泡"
+
+9. mood: 今日整体心情（积极/中性/消极）
+
+10. mood_score: 心情分数（0-100，综合表情、用词、语气判断）
+   - 0-30: 明显消极/emo
+   - 31-60: 平淡/中性
+   - 61-85: 积极/活跃
+   - 86-100: 非常开心/兴奋
+
+11. mood_reason: 心情评估依据（15-22字），简洁引用具体数据或特征
+
+返回JSON（不要markdown代码块）：
+{{
+  "tags": ["标签1", "标签2", "标签3"],
+  "active_time": "活跃时段描述",
+  "fun_score": 75,
+  "fun_comment": "整活质量评价",
+  "topic_leadership": 68,
+  "topic_comment": "话题引导力评价",
+  "rank_title": "黄金话痨III",
+  "rank_desc": "段位描述",
+  "mood": "积极/中性/消极",
+  "mood_score": 75,
+  "mood_reason": "基于表情使用、用词倾向等的评估理由"
+}}"""
+
+            # 使用 LLM 生成
+            model_task_config = model_config.model_task_config.replyer
+            success, result, reasoning, model_name = await llm_api.generate_with_model(
+                prompt=prompt,
+                model_config=model_task_config,
+                request_type="plugin.chat_summary.user_profile",
+            )
+
+            if not success:
+                logger.error(f"LLM生成用户画像失败: {result}")
+                return None
+
+            # 解析 JSON
+            data = ChatAnalysisUtils._parse_llm_json_object(result)
+            if not data:
+                return None
+
+            # 验证并返回（添加 user_id）
+            validated_data = ChatAnalysisUtils._validate_user_profile(data)
+            if validated_data:
+                validated_data["user_id"] = user_id
+            return validated_data
+
+        except Exception as e:
+            logger.error(f"分析用户画像失败: {e}", exc_info=True)
+            return None
+
+    @staticmethod
+    def _validate_user_profile(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """验证用户画像数据
+
+        Args:
+            data: 原始数据字典
+
+        Returns:
+            验证后的数据，失败返回 None
+        """
+        try:
+            if not isinstance(data, dict):
+                return None
+
+            # 验证必需字段
+            required_fields = ["tags", "active_time", "fun_score", "fun_comment", "topic_leadership", "topic_comment", "rank_title", "rank_desc", "mood", "mood_score", "mood_reason"]
+            if not all(key in data for key in required_fields):
+                logger.warning(f"用户画像数据缺少必需字段: {data}")
+                return None
+
+            # 验证并清理 tags
+            tags = data.get("tags", [])
+            if not isinstance(tags, list):
+                tags = []
+            # 最多3个标签，每个3-6个汉字（9-18字节）
+            tags = [str(tag)[:18] for tag in tags[:3] if len(str(tag).strip()) >= 3]
+
+            # 验证其他字段
+            active_time = str(data.get("active_time", ""))[:30]
+
+            # 验证整活质量评分
+            try:
+                fun_score = int(data.get("fun_score", 50))
+                fun_score = max(0, min(100, fun_score))
+            except (ValueError, TypeError):
+                fun_score = 50
+
+            fun_comment = str(data.get("fun_comment", ""))[:60]  # 约30字
+
+            # 验证话题引导力
+            try:
+                topic_leadership = int(data.get("topic_leadership", 50))
+                topic_leadership = max(0, min(100, topic_leadership))
+            except (ValueError, TypeError):
+                topic_leadership = 50
+
+            topic_comment = str(data.get("topic_comment", ""))[:60]  # 约30字
+
+            # 验证段位信息
+            rank_title = str(data.get("rank_title", ""))[:30]
+            rank_desc = str(data.get("rank_desc", ""))[:70]  # 约35字
+
+            mood = str(data.get("mood", "中性"))
+
+            # 验证 mood 值
+            if mood not in ["积极", "中性", "消极"]:
+                mood = "中性"
+
+            # 验证 mood_score
+            try:
+                mood_score = int(data.get("mood_score", 50))
+                mood_score = max(0, min(100, mood_score))  # 限制在 0-100
+            except (ValueError, TypeError):
+                mood_score = 50
+
+            mood_reason = str(data.get("mood_reason", ""))[:50]  # 限制为50字符（约25汉字）
+
+            if not tags or not active_time or not fun_comment or not topic_comment or not rank_title or not rank_desc or not mood_reason:
+                logger.warning("用户画像数据字段为空")
+                return None
+
+            return {
+                "tags": tags,
+                "active_time": active_time,
+                "fun_score": fun_score,
+                "fun_comment": fun_comment,
+                "topic_leadership": topic_leadership,
+                "topic_comment": topic_comment,
+                "rank_title": rank_title,
+                "rank_desc": rank_desc,
+                "mood": mood,
+                "mood_score": mood_score,
+                "mood_reason": mood_reason
+            }
+
+        except Exception as e:
+            logger.error(f"验证用户画像数据失败: {e}")
+            return None
+
+    @staticmethod
+    def _parse_llm_json_object(result: str) -> Optional[Dict[str, Any]]:
+        """解析 LLM 返回的 JSON 对象（非数组）
+
+        Args:
+            result: LLM 返回的原始结果
+
+        Returns:
+            解析后的字典，失败返回 None
+        """
+        try:
+            # 去除可能的 markdown 代码块标记
+            result = result.strip()
+            if result.startswith("```"):
+                parts = result.split("```")
+                if len(parts) >= 2:
+                    result = parts[1]
+                    if result.startswith("json"):
+                        result = result[4:]
+            result = result.strip()
+
+            # 尝试提取JSON对象部分（从第一个 { 到最后一个 }）
+            start_idx = result.find('{')
+            end_idx = result.rfind('}')
+
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                result = result[start_idx:end_idx + 1]
+
+            # 尝试直接解析
+            data = json.loads(result)
+
+            # 验证返回的是字典
+            if not isinstance(data, dict):
+                logger.warning(f"LLM返回非字典数据: {type(data)}")
+                return None
+
+            return data
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"解析 JSON 对象失败: {e}, 尝试清理后重试")
+            try:
+                # 移除 emoji
+                result_cleaned = ChatAnalysisUtils.EMOJI_PATTERN.sub('', result)
+
+                # 再次提取JSON对象部分
+                start_idx = result_cleaned.find('{')
+                end_idx = result_cleaned.rfind('}')
+
+                if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                    result_cleaned = result_cleaned[start_idx:end_idx + 1]
+
+                # 修复中文字符间的异常空格
+                result_cleaned = re.sub(r'([\u4e00-\u9fff])\s+([\u4e00-\u9fff])', r'\1\2', result_cleaned)
+
+                data = json.loads(result_cleaned)
+
+                if not isinstance(data, dict):
+                    return None
+
+                logger.info("成功通过清理解析JSON对象")
+                return data
+            except Exception as e2:
+                logger.error(f"清理后仍然失败: {e2}")
+                return None
+        except Exception as e:
+            logger.error(f"解析JSON对象时发生错误: {e}")
+            return None
+
+    @staticmethod
     def _parse_llm_json(result: str) -> List[Dict[str, Any]]:
         """解析 LLM 返回的 JSON（带 emoji 清理 fallback）
 
